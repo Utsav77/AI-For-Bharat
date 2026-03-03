@@ -803,10 +803,36 @@ export default function ShramSetuSaathi() {
             ))}
           </div>
           <PipelineVisual />
+          {/* Loading skeleton */}
+          <div style={{ ...S.glass, padding: 24, maxWidth: 480, margin: "16px auto 0", borderLeft: "4px solid rgba(249,115,22,0.3)", animation: "fadeInUp 0.4s ease-out" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div>
+                <div style={{ width: 140, height: 14, borderRadius: 999, background: "rgba(255,255,255,0.06)", animation: "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite" }} />
+                <div style={{ width: 200, height: 20, borderRadius: 8, background: "rgba(255,255,255,0.04)", marginTop: 10, animation: "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite" }} />
+              </div>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.04)", animation: "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite" }} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: 12 }}>
+              {[0,1,2,3].map(i => (
+                <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <div style={{ width: 24, height: 24, borderRadius: 6, background: "rgba(255,255,255,0.05)", animation: `pulse 2s cubic-bezier(0.4,0,0.6,1) infinite ${i * 0.15}s` }} />
+                  <div style={{ width: 40, height: 12, borderRadius: 4, background: "rgba(255,255,255,0.04)", animation: `pulse 2s cubic-bezier(0.4,0,0.6,1) infinite ${i * 0.15}s` }} />
+                </div>
+              ))}
+            </div>
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12, marginTop: 12 }}>
+              <div style={{ width: "90%", height: 12, borderRadius: 4, background: "rgba(255,255,255,0.04)", animation: "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite" }} />
+              <div style={{ width: "70%", height: 12, borderRadius: 4, background: "rgba(255,255,255,0.03)", marginTop: 8, animation: "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite 0.2s" }} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16 }}>
+              <Loader size={16} color="var(--saffron)" className="animate-spin" />
+              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Preparing results...</span>
+            </div>
+          </div>
         </div>
       )}
 
-      {appState === "results" && <ResultCard compact />}
+      {appState === "results" && ResultCard({ compact: true })}
 
       {appState === "error" && (
         <div style={{ ...S.glass, border: "2px solid var(--red)", padding: 32, textAlign: "center", maxWidth: 400 }}>
@@ -900,7 +926,7 @@ export default function ShramSetuSaathi() {
   };
 
   const ProcurementPanel = () => {
-    if (appState === "idle" || appState === "recording") return <DashboardIdleState />;
+    if (appState === "idle" || appState === "recording") return DashboardIdleState();
 
     return (
       <div style={{ animation: "fadeInUp 0.3s ease-out" }}>
@@ -1086,7 +1112,7 @@ export default function ShramSetuSaathi() {
 
   // ─── CREDIT PANEL ───
   const CreditPanel = () => {
-    if (appState === "idle" || appState === "recording") return <DashboardIdleState />;
+    if (appState === "idle" || appState === "recording") return DashboardIdleState();
 
     return (
       <div style={{ animation: "fadeInUp 0.3s ease-out" }}>
@@ -1247,7 +1273,7 @@ export default function ShramSetuSaathi() {
 
   // ─── SAFETY PANEL ───
   const SafetyPanel = () => {
-    if (appState === "idle" || appState === "recording") return <DashboardIdleState />;
+    if (appState === "idle" || appState === "recording") return DashboardIdleState();
 
     return (
       <div style={{ animation: "fadeInUp 0.3s ease-out" }}>
@@ -1353,9 +1379,9 @@ export default function ShramSetuSaathi() {
 
       {/* Main */}
       <main style={{ flex: 1, padding: 20, overflow: "auto" }}>
-        {activeTab === "procurement" && <ProcurementPanel />}
-        {activeTab === "credit" && <CreditPanel />}
-        {activeTab === "safety" && <SafetyPanel />}
+        {activeTab === "procurement" && ProcurementPanel()}
+        {activeTab === "credit" && CreditPanel()}
+        {activeTab === "safety" && SafetyPanel()}
       </main>
     </div>
   );
@@ -1480,6 +1506,10 @@ export default function ShramSetuSaathi() {
     @media (min-width: 768px) {
       .sidebar-desktop { display: block !important; }
       .md-hide-btn { display: none !important; }
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
     }
   `;
 
