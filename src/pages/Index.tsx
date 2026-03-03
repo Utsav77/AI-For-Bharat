@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import {
   Mic, MicOff, Send, ShoppingCart, CreditCard, Scale, Shield, Volume2,
@@ -877,22 +877,18 @@ export default function ShramSetuSaathi() {
                 }}>Price 35% · Time 25% · Rating 25% · Credit 15%</span>
               </div>
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={ONDC.map(o => ({ ...o, name: o.name.substring(0, 12) }))}>
+                <BarChart data={ONDC.map((o, i) => ({ name: o.name.substring(0, 12), score: o.score, fill: i === 0 ? "#F97316" : i === 1 ? "#F59E0B" : "#374151" }))}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
                   <YAxis domain={[0, 100]} tick={{ fontFamily: S.mono, fontSize: 10, fill: "#475569" }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v + "%"} />
                   <Tooltip content={({ active, payload }) => active && payload?.[0] ? (
                     <div style={{ background: "#141B2D", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 12px" }}>
-                      <div style={{ fontSize: 12 }}>{payload[0].payload.name}</div>
+                      <div style={{ fontSize: 12 }}>{(payload[0].payload as any).name}</div>
                       <div style={{ fontFamily: S.mono, fontSize: 14, color: "var(--saffron)" }}>Score: {payload[0].value}%</div>
                     </div>
                   ) : null} />
                   <ReferenceLine y={84.7} stroke="rgba(249,115,22,0.5)" strokeDasharray="4 4" />
-                  <Bar dataKey="score" radius={[6, 6, 0, 0]} animationDuration={800}>
-                    {ONDC.map((_, i) => (
-                      <Cell key={i} fill={i === 0 ? "#F97316" : i === 1 ? "#F59E0B" : "#374151"} />
-                    ))}
-                  </Bar>
+                  <Bar dataKey="score" fill="#F97316" radius={[6, 6, 0, 0]} animationDuration={800} />
                 </BarChart>
               </ResponsiveContainer>
               <div style={{ display: "flex", gap: 12, marginTop: 8, justifyContent: "center" }}>
@@ -1130,21 +1126,17 @@ export default function ShramSetuSaathi() {
             <div style={{ ...S.glass, padding: 20, marginTop: 16 }}>
               <div style={{ fontFamily: S.serif, fontSize: 18, marginBottom: 16 }}>Best Loan Offers via OCEN 4.0</div>
               <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={OCEN.map(o => ({ ...o, name: o.name.substring(0, 12) }))}>
+                <BarChart data={OCEN.map((o, i) => ({ name: o.name.substring(0, 12), score: o.score, fill: i === 0 ? "#F59E0B" : i === 1 ? "#D97706" : "#374151" }))}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
                   <YAxis domain={[0, 100]} tick={{ fontFamily: S.mono, fontSize: 10, fill: "#475569" }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v + "%"} />
                   <Tooltip content={({ active, payload }) => active && payload?.[0] ? (
                     <div style={{ background: "#141B2D", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 12px" }}>
-                      <div style={{ fontSize: 12 }}>{payload[0].payload.name}</div>
+                      <div style={{ fontSize: 12 }}>{(payload[0].payload as any).name}</div>
                       <div style={{ fontFamily: S.mono, fontSize: 14, color: "var(--amber)" }}>Score: {payload[0].value}%</div>
                     </div>
                   ) : null} />
-                  <Bar dataKey="score" radius={[6, 6, 0, 0]} animationDuration={800}>
-                    {OCEN.map((_, i) => (
-                      <Cell key={i} fill={i === 0 ? "#F59E0B" : i === 1 ? "#D97706" : "#374151"} />
-                    ))}
-                  </Bar>
+                  <Bar dataKey="score" fill="#F59E0B" radius={[6, 6, 0, 0]} animationDuration={800} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
