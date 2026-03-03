@@ -478,11 +478,12 @@ export default function ShramSetuSaathi() {
       </div>
 
       {/* Transaction Chart */}
-      <div style={{ ...S.glass, padding: 14, marginTop: 12 }}>
+      <div style={{ ...S.glass, padding: 14, marginTop: 12, overflow: "visible" }}>
         <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 8 }}>6-Month Sales (₹)</div>
-        <ResponsiveContainer width="100%" height={100}>
-          <BarChart data={RAVI.txnHistory}>
+        <ResponsiveContainer width="100%" height={120}>
+          <BarChart data={RAVI.txnHistory} margin={{ top: 4, right: 4, bottom: 20, left: 0 }}>
             <CartesianGrid strokeDasharray="2 2" stroke="rgba(255,255,255,0.04)" vertical={false} />
+            <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#94A3B8", dy: 4 }} height={28} tickLine={false} axisLine={false} />
             <Bar dataKey="amt" fill="var(--saffron)" radius={[4, 4, 0, 0]} animationDuration={800} />
             <Tooltip contentStyle={{
               background: "#141B2D", border: "1px solid rgba(255,255,255,0.1)",
@@ -734,32 +735,19 @@ export default function ShramSetuSaathi() {
             <div style={{ fontFamily: S.hindi, fontSize: "1.1rem", fontWeight: 600 }}>बोलो, Saathi सुनेगा</div>
             <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 4 }}>Hold to speak · दबाकर बोलें</div>
           </div>
-          {/* Tab context */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 24 }}>
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Ask about:</span>
-            {(["procurement", "credit", "safety"] as ActiveTab[]).map(t => (
-              <button key={t} onClick={() => setActiveTab(t)} style={{
-                background: "none", border: "none", cursor: "pointer", padding: "4px 0",
-                color: activeTab === t ? "white" : "var(--text-muted)", fontSize: 13,
-                borderBottom: activeTab === t ? "2px solid var(--saffron)" : "2px solid transparent",
-                transition: "all 200ms",
-              }}>
-                {t === "procurement" ? "🛒 Logistics" : t === "credit" ? "💳 Credit" : "⚖️ Rights"}
-              </button>
-            ))}
-          </div>
           {/* Example chips */}
-          <div style={{ marginTop: 20, maxWidth: 400, width: "100%", padding: "0 20px" }}>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>Try asking →</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {EXAMPLE_CHIPS[activeTab].map((chip, i) => (
-                <button key={i} onClick={() => submitQuery(chip)} style={{
-                  background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: 999, padding: "8px 18px", fontSize: 13, color: "var(--text-secondary)",
-                  cursor: "pointer", textAlign: "left", transition: "all 150ms",
-                }}>{chip}</button>
-              ))}
-            </div>
+          <div style={{ marginTop: 40, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Try asking →</div>
+            {EXAMPLE_CHIPS[activeTab].map((chip, i) => (
+              <button key={i} onClick={() => submitQuery(chip)} style={{
+                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.09)",
+                borderRadius: 999, padding: "9px 20px", fontSize: 13, color: "var(--text-secondary)",
+                cursor: "pointer", transition: "all 150ms", maxWidth: 320, opacity: 0.85,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(249,115,22,0.45)"; e.currentTarget.style.color = "var(--saffron)"; e.currentTarget.style.background = "rgba(249,115,22,0.05)"; e.currentTarget.style.transform = "scale(1.02)"; e.currentTarget.style.opacity = "1"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.09)"; e.currentTarget.style.color = "var(--text-secondary)"; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.opacity = "0.85"; }}
+              >{chip}</button>
+            ))}
           </div>
         </>
       )}
@@ -835,21 +823,84 @@ export default function ShramSetuSaathi() {
   );
 
   // ─── DASHBOARD PROCUREMENT ───
-  const ProcurementPanel = () => {
-    if (appState === "idle" || appState === "recording") return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
-        <ShoppingCart size={48} color="var(--saffron)" style={{ opacity: 0.5 }} />
-        <p style={{ fontSize: 15, color: "var(--text-secondary)", marginTop: 12 }}>Run a voice query to see TOPSIS analysis</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 16, justifyContent: "center" }}>
-          {EXAMPLE_CHIPS.procurement.map((c, i) => (
-            <button key={i} onClick={() => submitQuery(c)} style={{
-              background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 999, padding: "8px 16px", fontSize: 13, color: "var(--text-secondary)", cursor: "pointer",
-            }}>{c}</button>
+  // Dashboard idle state shared across tabs
+  const DashboardIdleState = () => {
+    const capCards: { tab: ActiveTab; icon: React.ReactNode; title: string; sub: string; color: string; hoverBorder: string }[] = [
+      { tab: "procurement", icon: <ShoppingCart size={20} color="#F97316" />, title: "ONDC Logistics", sub: "7 providers · TOPSIS ranked", color: "#F97316", hoverBorder: "rgba(249,115,22,0.3)" },
+      { tab: "credit", icon: <CreditCard size={20} color="#F59E0B" />, title: "OCEN 4.0 Credit", sub: "4 lenders · flow-based scoring", color: "#F59E0B", hoverBorder: "rgba(245,158,11,0.3)" },
+      { tab: "safety", icon: <Scale size={20} color="#8B5CF6" />, title: "Labour Rights", sub: "CeRAI framework · RAG validated", color: "#8B5CF6", hoverBorder: "rgba(139,92,246,0.3)" },
+    ];
+    return (
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        minHeight: "calc(100vh - 64px - 80px)", padding: 24,
+      }}>
+        {/* Worker Context Summary */}
+        <div style={{
+          ...S.glass, maxWidth: 560, width: "100%", padding: 24, borderLeft: "3px solid rgba(249,115,22,0.4)",
+          animation: "fadeInUp 0.4s ease-out",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: "linear-gradient(135deg, #F97316, #7C3AED)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: "white", flexShrink: 0 }}>R</div>
+                <span style={{ fontSize: 15, fontWeight: 700 }}>{RAVI.name}</span>
+              </div>
+              <div style={{ fontFamily: S.hindi, fontSize: 12, color: "var(--text-secondary)", marginTop: 2, marginLeft: 50 }}>{RAVI.nameHindi}</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, marginLeft: 50 }}>📍 {RAVI.location}  ·  🛒 {RAVI.business}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Last session: today</div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 999, padding: "3px 10px", marginTop: 4 }}>
+                <Zap size={12} color="var(--amber)" />
+                <span style={{ fontFamily: S.mono, fontSize: 11, color: "var(--amber)", fontWeight: 500 }}>MEDIUM</span>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--emerald)", marginTop: 4 }}>Ready for next query</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Capability Cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, maxWidth: 560, width: "100%", marginTop: 24 }}>
+          {capCards.map((c, i) => (
+            <button key={c.tab} onClick={() => { setActiveTab(c.tab); submitQuery(EXAMPLE_CHIPS[c.tab][0]); }} style={{
+              ...S.glass, padding: 16, border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12,
+              cursor: "pointer", textAlign: "left", transition: "all 200ms",
+              animation: `fadeInUp 0.4s ease-out ${i * 0.08}s both`,
+              background: "rgba(255,255,255,0.03)",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = c.hoverBorder; e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.transform = "scale(1.01)"; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)"; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.transform = "scale(1)"; }}
+            >
+              <div style={{ marginBottom: 8 }}>{c.icon}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>{c.title}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{c.sub}</div>
+            </button>
           ))}
+        </div>
+
+        {/* Example Chips */}
+        <div style={{ marginTop: 20, animation: "fadeInUp 0.3s ease-out 0.3s both" }}>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center", marginBottom: 8 }}>Try asking →</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+            {EXAMPLE_CHIPS[activeTab].map((chip, i) => (
+              <button key={i} onClick={() => submitQuery(chip)} style={{
+                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.09)",
+                borderRadius: 999, padding: "9px 20px", fontSize: 13, color: "var(--text-secondary)",
+                cursor: "pointer", transition: "all 150ms", opacity: 0.85,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(249,115,22,0.45)"; e.currentTarget.style.color = "var(--saffron)"; e.currentTarget.style.background = "rgba(249,115,22,0.05)"; e.currentTarget.style.transform = "scale(1.02)"; e.currentTarget.style.opacity = "1"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.09)"; e.currentTarget.style.color = "var(--text-secondary)"; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.opacity = "0.85"; }}
+              >{chip}</button>
+            ))}
+          </div>
         </div>
       </div>
     );
+  };
+
+  const ProcurementPanel = () => {
+    if (appState === "idle" || appState === "recording") return <DashboardIdleState />;
 
     return (
       <div style={{ animation: "fadeInUp 0.3s ease-out" }}>
@@ -1035,20 +1086,7 @@ export default function ShramSetuSaathi() {
 
   // ─── CREDIT PANEL ───
   const CreditPanel = () => {
-    if (appState === "idle" || appState === "recording") return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
-        <CreditCard size={48} color="var(--saffron)" style={{ opacity: 0.5 }} />
-        <p style={{ fontSize: 15, color: "var(--text-secondary)", marginTop: 12 }}>Ask about micro-credit options</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 16, justifyContent: "center" }}>
-          {EXAMPLE_CHIPS.credit.map((c, i) => (
-            <button key={i} onClick={() => submitQuery(c)} style={{
-              background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 999, padding: "8px 16px", fontSize: 13, color: "var(--text-secondary)", cursor: "pointer",
-            }}>{c}</button>
-          ))}
-        </div>
-      </div>
-    );
+    if (appState === "idle" || appState === "recording") return <DashboardIdleState />;
 
     return (
       <div style={{ animation: "fadeInUp 0.3s ease-out" }}>
@@ -1209,21 +1247,7 @@ export default function ShramSetuSaathi() {
 
   // ─── SAFETY PANEL ───
   const SafetyPanel = () => {
-    if (appState === "idle" || appState === "recording") return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
-        <Scale size={48} color="var(--violet)" style={{ opacity: 0.5 }} />
-        <p style={{ fontSize: 15, color: "var(--text-secondary)", marginTop: 12 }}>Ask about your labor rights</p>
-        <p style={{ fontFamily: S.hindi, fontSize: 14, color: "var(--text-muted)" }}>अपने अधिकार जानें</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 16, justifyContent: "center" }}>
-          {EXAMPLE_CHIPS.safety.map((c, i) => (
-            <button key={i} onClick={() => submitQuery(c)} style={{
-              background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 999, padding: "8px 16px", fontSize: 13, color: "var(--text-secondary)", cursor: "pointer",
-            }}>{c}</button>
-          ))}
-        </div>
-      </div>
-    );
+    if (appState === "idle" || appState === "recording") return <DashboardIdleState />;
 
     return (
       <div style={{ animation: "fadeInUp 0.3s ease-out" }}>
