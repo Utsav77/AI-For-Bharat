@@ -410,6 +410,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 Built with ❤️ for India's informal workforce
 
-[🇮🇳 Bharat AI Hackathon 2024](https://example.com) · [AWS ap-south-1](https://aws.amazon.com/about-aws/global-infrastructure/regions_az/) · [ONDC](https://ondc.org/) · [OCEN 4.0](https://ocen.dev/) · [Bhashini](https://bhashini.gov.in/)
+[🇮🇳AI for Bharat Hackathon 2026](https://example.com) · [AWS ap-south-1](https://aws.amazon.com/about-aws/global-infrastructure/regions_az/) · [ONDC](https://ondc.org/) · [OCEN 4.0](https://ocen.dev/) · [Bhashini](https://bhashini.gov.in/)
 
 </div>
