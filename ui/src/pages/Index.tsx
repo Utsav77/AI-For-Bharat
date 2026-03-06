@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
@@ -1138,6 +1138,75 @@ export default function ShramSetuSaathi() {
     const safetyScore = apiSafetyScore ?? (activeTab === "safety" ? 0.91 : 0.95);
     const pick = apiTopPick; // null = use hardcoded
 
+    // ── GENERAL INTENT: show conversational answer only, no provider card ──
+    const isGeneral = apiIntentType === "general" || (!pick && !apiRankedOptions?.length && !!apiHindiExplanation);
+    if (isGeneral) {
+      return (
+        <div style={{
+          ...S.glass, padding: compact ? 20 : 24, maxWidth: compact ? 480 : "100%",
+          margin: compact ? "0 auto" : 0,
+          borderLeft: "4px solid var(--blue)",
+          animation: "fadeInUp 0.5s cubic-bezier(0.34,1.56,0.64,1)",
+        }}>
+          {/* Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+            <span style={{
+              background: "rgba(59,130,246,0.15)", color: "var(--blue)",
+              fontSize: 11, borderRadius: 999, padding: "4px 10px", fontWeight: 600,
+            }}>💬 Saathi का जवाब</span>
+            <SafetyBadge score={safetyScore} />
+          </div>
+
+          {/* Audio + explanation */}
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <Volume2 size={16} color="var(--blue)" />
+              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Saathi कह रहा है:</span>
+            </div>
+            <AudioWaveform playing={audioPlaying} />
+            {!audioPlaying && appState === "results" && (
+              <button
+                onClick={() => {
+                  if (audioRef.current) {
+                    audioRef.current.currentTime = 0;
+                    setAudioPlaying(true);
+                    audioRef.current.play().catch(() => setTimeout(() => setAudioPlaying(false), 3000));
+                  }
+                }}
+                style={{
+                  background: "none", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 8,
+                  padding: "4px 12px", color: "var(--blue)", fontSize: 12, cursor: "pointer", marginTop: 6,
+                }}>🔊 फिर सुनें</button>
+            )}
+            <p style={{
+              fontFamily: S.hindi, fontSize: "0.95rem", lineHeight: 1.9, color: "#F1F5F9",
+              marginTop: 10, minHeight: 40,
+            }}>
+              {showEnglish ? displayText : displayText}
+              {hindiCharIndex < liveHindi.length && <span style={{ opacity: 0.5 }}>▌</span>}
+            </p>
+            {interimText && (
+              <div style={{
+                fontSize: 11, color: "var(--text-muted)", marginTop: 6,
+                fontFamily: S.mono, background: "rgba(255,255,255,0.03)",
+                borderRadius: 6, padding: "4px 10px",
+              }}>🎙 "{interimText}"</div>
+            )}
+          </div>
+
+          {/* Single "Ask Again" button — no Confirm for general queries */}
+          <div style={{ marginTop: 16 }}>
+            <button onClick={resetToIdle} style={{
+              width: "100%", background: "transparent",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 10, padding: 12, fontSize: 14,
+              color: "var(--text-secondary)", cursor: "pointer",
+            }}>🎙 कुछ और पूछें · Ask Something Else</button>
+          </div>
+        </div>
+      );
+    }
+
     const topName = pick?.name
       ?? (activeTab === "procurement" ? "Ekart Logistics" : activeTab === "credit" ? "NanoFin Microloan" : "Overtime Rights");
 
@@ -1839,7 +1908,7 @@ export default function ShramSetuSaathi() {
               // Criteria weights label
               const weights = apiCriteriaWeights;
               const weightsLabel = weights
-                ? Object.entries(weights).map(([k, v]) => `${k.replace("_inr","").replace("_"," ")} ${Math.round(v*100)}%`).join(" · ")
+                ? Object.entries(weights).map(([k, v]) => `${k.replace("_inr","").replace("_"," ")} ${Math.round((v as number)*100)}%`).join(" · ")
                 : "Price 35% · Time 25% · Rating 25% · Credit 15%";
               return (
                 <div style={{ ...S.glass, padding: 20, marginTop: 16 }}>
