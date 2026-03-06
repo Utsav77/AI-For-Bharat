@@ -13,6 +13,76 @@ type UIMode = "voice" | "dashboard";
 type AppState = "idle" | "recording" | "processing" | "results" | "error";
 type ActiveTab = "procurement" | "credit" | "safety";
 
+// ─── API RESPONSE TYPES ───
+interface ApiProvider {
+  providerId: string;
+  name: string;
+  price_inr: number;
+  delivery_days: number;
+  rating: number;
+  accepts_credit: number | boolean;
+  topsis_score: number;
+  commission_pct?: number;
+  coverage_pincode?: string;
+}
+
+interface ApiResponse {
+  sessionId?: string;
+  language?: string;
+  text?: string;
+  intent?: {
+    statusCode: number;
+    body: {
+      intent_type: string;
+      confidence: number;
+      entities?: Record<string, unknown>;
+      t_llm_intent?: number;
+    };
+  };
+  agentResult?: {
+    statusCode: number;
+    body: {
+      options: ApiProvider[];
+      criteria_weights: Record<string, number>;
+      source?: string;
+    };
+  };
+  topsisResult?: {
+    statusCode: number;
+    body: {
+      ranked_options: ApiProvider[];
+      top_pick: ApiProvider;
+      criteria_weights: Record<string, number>;
+      t_topsis?: number;
+    };
+  };
+  safetyResult?: {
+    statusCode: number;
+    body: {
+      safety_score: number;
+      is_safe: boolean;
+      action: string;
+      flags: string[];
+    };
+  };
+  explanation?: {
+    statusCode: number;
+    body: {
+      explanation_hindi: string;
+      top_pick: ApiProvider;
+      t_llm_explain?: number;
+    };
+  };
+  ttsResult?: {
+    statusCode: number;
+    body: {
+      audioUrl: string;
+      text: string;
+      t_tts?: number;
+    };
+  };
+}
+
 // ─── CONSTANTS ───
 const API_URL = "https://ei1hvlz5vg.execute-api.ap-south-1.amazonaws.com/query";
 
@@ -153,6 +223,16 @@ export default function ShramSetuSaathi() {
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [apiAudioUrl, setApiAudioUrl] = useState<string | null>(null);
 
+  // ── Live API data (populated from response, fallback to hardcoded) ──
+  const [apiRankedOptions, setApiRankedOptions] = useState<ApiProvider[] | null>(null);
+  const [apiTopPick, setApiTopPick] = useState<ApiProvider | null>(null);
+  const [apiHindiExplanation, setApiHindiExplanation] = useState<string | null>(null);
+  const [apiSafetyScore, setApiSafetyScore] = useState<number | null>(null);
+  const [apiConfidence, setApiConfidence] = useState<number | null>(null);
+  const [apiIntentType, setApiIntentType] = useState<string | null>(null);
+  const [apiCriteriaWeights, setApiCriteriaWeights] = useState<Record<string, number> | null>(null);
+  const [apiLatencies, setApiLatencies] = useState<{ topsis: number; llm: number; tts: number } | null>(null);
+
   // Sidebar count-up
   const [countMonths, setCountMonths] = useState(0);
   const [countTxns, setCountTxns] = useState(0);
@@ -258,6 +338,8 @@ export default function ShramSetuSaathi() {
   //  API CALL — POST transcript to backend
   // ─────────────────────────────────────────────
   const callAPI = useCallback(async (query: string, asrMs?: number) => {
+    const asrSec = asrMs ? (asrMs / 1000).toFixed(1) : "0.8";
+
     try {
       const payload = {
         query,
@@ -275,49 +357,67 @@ export default function ShramSetuSaathi() {
 
       if (!response.ok) throw new Error(`API ${response.status}`);
 
-      const data = await response.json();
+      const data: ApiResponse = await response.json();
       const apiMs = Date.now() - t0;
 
-      // ── Map intent to active tab ──
-      if (data.intent) {
-        if (data.intent.includes("credit") || data.intent.includes("loan")) {
-          setActiveTab("credit");
-        } else if (
-          data.intent.includes("safety") ||
-          data.intent.includes("labour") ||
-          data.intent.includes("legal")
-        ) {
-          setActiveTab("safety");
-        } else {
-          setActiveTab("procurement");
-        }
+      // ── 1. Intent → active tab ──
+      const intentType = data.intent?.body?.intent_type ?? "";
+      setApiIntentType(intentType);
+      setApiConfidence(data.intent?.body?.confidence ?? null);
+
+      if (intentType.includes("credit") || intentType.includes("loan")) {
+        setActiveTab("credit");
+      } else if (
+        intentType.includes("safety") ||
+        intentType.includes("labour") ||
+        intentType.includes("legal")
+      ) {
+        setActiveTab("safety");
+      } else {
+        setActiveTab("procurement");
       }
 
-      // ── Play audio if API returns a TTS URL ──
-      if (data.audioUrl || data.audio_url) {
-        const url = data.audioUrl || data.audio_url;
-        setApiAudioUrl(url);
-        const audio = new Audio(url);
+      // ── 2. TOPSIS ranked options ──
+      const ranked = data.topsisResult?.body?.ranked_options ?? null;
+      const topPick = data.topsisResult?.body?.top_pick ?? null;
+      setApiRankedOptions(ranked);
+      setApiTopPick(topPick);
+      setApiCriteriaWeights(data.topsisResult?.body?.criteria_weights ?? null);
+
+      // ── 3. Safety score ──
+      setApiSafetyScore(data.safetyResult?.body?.safety_score ?? null);
+
+      // ── 4. Hindi explanation ──
+      const hindiText = data.explanation?.body?.explanation_hindi ?? null;
+      setApiHindiExplanation(hindiText);
+
+      // ── 5. TTS audio URL ──
+      const audioUrl = data.ttsResult?.body?.audioUrl ?? null;
+      if (audioUrl) {
+        setApiAudioUrl(audioUrl);
+        const audio = new Audio(audioUrl);
         audio.play().catch(() => {});
       }
 
-      // ── Build latency breakdown ──
-      const asrSec = asrMs ? (asrMs / 1000).toFixed(1) : "0.8";
-      const apiSec = (apiMs / 1000).toFixed(1);
-      const ttsSec = (0.4 + Math.random() * 0.3).toFixed(1);
-      const totalSec = (
-        parseFloat(asrSec) + parseFloat(apiSec) + parseFloat(ttsSec)
-      ).toFixed(1);
-      setLatencyData({ total: totalSec, asr: asrSec, ai: apiSec, tts: ttsSec });
+      // ── 6. Internal latencies from response ──
+      const topsisMs  = data.topsisResult?.body?.t_topsis ?? 0;
+      const llmMs     = data.explanation?.body?.t_llm_explain ?? 529;
+      const ttsMs     = data.ttsResult?.body?.t_tts ?? 257;
+      setApiLatencies({ topsis: topsisMs, llm: llmMs, tts: ttsMs });
+
+      // ── 7. Latency ticker ──
+      const aiSec  = (apiMs / 1000).toFixed(1);
+      const ttsSec = (ttsMs / 1000).toFixed(2);
+      setLatencyData({
+        total: (parseFloat(asrSec) + parseFloat(aiSec) + parseFloat(ttsSec)).toFixed(1),
+        asr: asrSec, ai: aiSec, tts: ttsSec,
+      });
       setShowLatency(true);
       setTimeout(() => setShowLatency(false), 8000);
 
     } catch (err) {
-      // Non-fatal: processing animation already running; demo data will display
-      console.warn("API call failed, showing demo data:", err);
-
-      // Still show a latency ticker with simulated numbers
-      const asrSec = asrMs ? (asrMs / 1000).toFixed(1) : "0.8";
+      // Non-fatal — demo data will display, just show simulated latency
+      console.warn("API call failed, falling back to demo data:", err);
       const aiSec  = (1.2 + Math.random() * 0.5).toFixed(1);
       const ttsSec = (0.4 + Math.random() * 0.3).toFixed(1);
       setLatencyData({
@@ -378,7 +478,8 @@ export default function ShramSetuSaathi() {
   useEffect(() => {
     if (appState !== "results") return;
     setHindiCharIndex(0);
-    const text = HINDI_RESPONSES[activeTab];
+    // Prefer live API explanation; fall back to hardcoded
+    const text = apiHindiExplanation || HINDI_RESPONSES[activeTab];
     const iv = setInterval(() => {
       setHindiCharIndex(prev => {
         if (prev >= text.length) { clearInterval(iv); return prev; }
@@ -386,7 +487,7 @@ export default function ShramSetuSaathi() {
       });
     }, 25);
     return () => clearInterval(iv);
-  }, [appState, activeTab]);
+  }, [appState, activeTab, apiHindiExplanation]);
 
   // ─────────────────────────────────────────────
   //  SIDEBAR COUNT-UP
@@ -425,6 +526,15 @@ export default function ShramSetuSaathi() {
     setShowEnglish(false);
     setSpeechError(null);
     setApiAudioUrl(null);
+    // Clear live API data so next query starts fresh
+    setApiRankedOptions(null);
+    setApiTopPick(null);
+    setApiHindiExplanation(null);
+    setApiSafetyScore(null);
+    setApiConfidence(null);
+    setApiIntentType(null);
+    setApiCriteriaWeights(null);
+    setApiLatencies(null);
   }, [stopRecording]);
 
   const getCurrentSpeakingText = useCallback(() => {
@@ -673,13 +783,27 @@ export default function ShramSetuSaathi() {
   );
 
   // ─── PIPELINE VISUAL ───
-  const PipelineVisual = ({ vertical = false }: { vertical?: boolean }) => (
+  const PipelineVisual = ({ vertical = false }: { vertical?: boolean }) => {
+    // Build labels dynamically from live API data where available
+    const providerCount = apiRankedOptions?.length ?? 7;
+    const confidence = apiConfidence != null ? `${Math.round(apiConfidence * 100)}%` : "94%";
+    const safetyScore = apiSafetyScore != null ? apiSafetyScore.toFixed(2) : "0.95";
+    const intentLabel = apiIntentType ?? "procurement_search";
+    const dynamicLabels = [
+      { label: "ASR",    sub: `Web Speech · ${LANG_TO_BCP47[selectedLang] || "hi-IN"}` },
+      { label: "Intent", sub: `${intentLabel} · ${confidence}` },
+      { label: "ONDC",   sub: `${providerCount} providers · Beckn Protocol` },
+      { label: "TOPSIS", sub: `Ranked · ${Object.keys(apiCriteriaWeights ?? {}).length || 4} criteria` },
+      { label: "Safety", sub: `Score ${safetyScore} · PROCEED` },
+      { label: "Hindi",  sub: `Claude Sonnet · ${apiHindiExplanation?.length ?? 142} chars` },
+    ];
+    return (
     <div style={{
       display: "flex", flexDirection: vertical ? "column" : "row",
       alignItems: "center", justifyContent: "center", gap: vertical ? 4 : 0,
       padding: "16px 0",
     }}>
-      {PROCESSING_LABELS.map((step, i) => {
+      {dynamicLabels.map((step, i) => {
         const completed = processingStep > i;
         const active = processingStep === i;
         return (
@@ -711,27 +835,34 @@ export default function ShramSetuSaathi() {
         );
       })}
     </div>
-  );
+    );
+  };
 
   // ─── RESULT CARD ───
   const ResultCard = ({ compact = false }: { compact?: boolean }) => {
-    const hindiText = HINDI_RESPONSES[activeTab];
-    const displayText = hindiText.slice(0, hindiCharIndex);
+    // ── Resolve data: prefer live API, fall back to hardcoded ──
+    const liveHindi  = apiHindiExplanation || HINDI_RESPONSES[activeTab];
+    const displayText = liveHindi.slice(0, hindiCharIndex);
+    const safetyScore = apiSafetyScore ?? (activeTab === "safety" ? 0.91 : 0.95);
+    const pick = apiTopPick; // null = use hardcoded
+
+    const topName = pick?.name
+      ?? (activeTab === "procurement" ? "Ekart Logistics" : activeTab === "credit" ? "NanoFin Microloan" : "Overtime Rights");
 
     const statsRow = activeTab === "procurement" ? [
-      { icon: "📦", val: "₹380", label: "Price" },
-      { icon: "💨", val: "3 days", label: "Delivery" },
-      { icon: "⭐", val: "4.5", label: "Rating" },
-      { icon: "💳", val: "✓", label: "Credit" },
+      { icon: "📦", val: pick ? `₹${pick.price_inr}` : "₹380",      label: "Price" },
+      { icon: "💨", val: pick ? `${pick.delivery_days} days` : "3 days", label: "Delivery" },
+      { icon: "⭐", val: pick ? String(pick.rating) : "4.5",          label: "Rating" },
+      { icon: "💳", val: (pick ? Boolean(pick.accepts_credit) : true) ? "✓" : "–", label: "Credit" },
     ] : activeTab === "credit" ? [
-      { icon: "💰", val: "12.5%", label: "Rate p.a." },
+      { icon: "💰", val: "12.5%",    label: "Rate p.a." },
       { icon: "📅", val: "Flexible", label: "Tenure" },
-      { icon: "⚡", val: "2 hrs", label: "Disburse" },
-      { icon: "✅", val: "None", label: "Penalty" },
+      { icon: "⚡", val: "2 hrs",    label: "Disburse" },
+      { icon: "✅", val: "None",     label: "Penalty" },
     ] : [
-      { icon: "⚖️", val: "§59", label: "Section" },
+      { icon: "⚖️", val: "§59",  label: "Section" },
       { icon: "📜", val: "1948", label: "Act Year" },
-      { icon: "💰", val: "2×", label: "OT Rate" },
+      { icon: "💰", val: "2×",   label: "OT Rate" },
       { icon: "📞", val: "1800", label: "Helpline" },
     ];
 
@@ -752,7 +883,7 @@ export default function ShramSetuSaathi() {
               {activeTab === "safety" ? "⚖️ Your Rights" : "🏆 #1 Recommendation"}
             </span>
             <div style={{ fontFamily: S.serif, fontSize: compact ? 22 : 26, marginTop: 8 }}>
-              {activeTab === "procurement" ? "Ekart Logistics" : activeTab === "credit" ? "NanoFin Microloan" : "Overtime Rights"}
+              {topName}
             </div>
             {activeTab !== "safety" && (
               <span style={{
@@ -763,7 +894,7 @@ export default function ShramSetuSaathi() {
               </span>
             )}
           </div>
-          <SafetyBadge score={activeTab === "safety" ? 0.91 : 0.95} />
+          <SafetyBadge score={safetyScore} />
         </div>
 
         <div style={{
@@ -807,7 +938,7 @@ export default function ShramSetuSaathi() {
             marginTop: 10, minHeight: 40,
           }}>
             {showEnglish ? ENGLISH_RESPONSES[activeTab] : displayText}
-            {!showEnglish && hindiCharIndex < hindiText.length && <span style={{ opacity: 0.5 }}>▌</span>}
+            {!showEnglish && hindiCharIndex < liveHindi.length && <span style={{ opacity: 0.5 }}>▌</span>}
           </p>
           {/* Show actual query spoken */}
           {interimText && (
@@ -844,12 +975,18 @@ export default function ShramSetuSaathi() {
               cursor: "pointer",
             }}>See full TOPSIS analysis & agent pipeline →</button>
             <div style={{ display: "flex", justifyContent: "center", gap: 2, marginTop: 8 }}>
-              {[84.7, 71.2, 68.4, 54.1, 49.8].map((s, i) => (
-                <div key={i} style={{
-                  height: 4, width: 32, borderRadius: 2,
-                  background: i === 0 ? "var(--saffron)" : `rgba(249,115,22,${0.4 - i * 0.08})`,
-                }} />
-              ))}
+              {(apiRankedOptions ?? ONDC).slice(0, 5).map((o, i) => {
+                const s = "topsis_score" in o
+                  ? Math.round((o as ApiProvider).topsis_score * 100)
+                  : (o as typeof ONDC[0]).score;
+                return (
+                  <div key={i} style={{
+                    height: 4, width: 32, borderRadius: 2,
+                    background: i === 0 ? "var(--saffron)" : `rgba(249,115,22,${0.4 - i * 0.08})`,
+                    title: String(s),
+                  }} />
+                );
+              })}
             </div>
           </div>
         )}
@@ -1147,102 +1284,159 @@ export default function ShramSetuSaathi() {
           <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#F97316,#7C3AED)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "white", flexShrink: 0 }}>R</div>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14 }}>{currentQuery}</div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>procurement_search · 94% confidence</div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+              {apiIntentType ?? "procurement_search"} · {apiConfidence != null ? `${Math.round(apiConfidence * 100)}%` : "94%"} confidence
+            </div>
           </div>
         </div>
         {(appState === "processing" || appState === "results") && <PipelineVisual />}
         {appState === "results" && (
           <>
-            <div style={{ ...S.glass, padding: 20, marginTop: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-                <span style={{ fontFamily: S.serif, fontSize: 18 }}>TOPSIS Ranked Results</span>
-                <span style={{ fontSize: 11, color: "var(--saffron)", background: "rgba(249,115,22,0.08)", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 999, padding: "4px 12px" }}>Price 35% · Time 25% · Rating 25% · Credit 15%</span>
-              </div>
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={ONDC.map((o, i) => ({ name: o.name.substring(0, 12), score: o.score }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
-                  <YAxis domain={[0, 100]} tick={{ fontFamily: S.mono, fontSize: 10, fill: "#475569" }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v + "%"} />
-                  <Tooltip content={({ active, payload }) => active && payload?.[0] ? (
-                    <div style={{ background: "#141B2D", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 12px" }}>
-                      <div style={{ fontSize: 12 }}>{(payload[0].payload as any).name}</div>
-                      <div style={{ fontFamily: S.mono, fontSize: 14, color: "var(--saffron)" }}>Score: {payload[0].value}%</div>
-                    </div>
-                  ) : null} />
-                  <ReferenceLine y={84.7} stroke="rgba(249,115,22,0.5)" strokeDasharray="4 4" />
-                  <Bar dataKey="score" fill="#F97316" radius={[6, 6, 0, 0]} animationDuration={800} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div style={{ ...S.glass, borderLeft: "4px solid var(--saffron)", padding: 24, marginTop: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
-                <div>
-                  <span style={{ background: "rgba(249,115,22,0.15)", color: "var(--saffron)", fontSize: 11, borderRadius: 999, padding: "4px 10px", fontWeight: 600 }}>🏆 #1 Recommendation</span>
-                  <div style={{ fontFamily: S.serif, fontSize: 22, marginTop: 8 }}>Ekart Logistics</div>
-                  <span style={{ fontSize: 11, color: "var(--blue)", background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 999, padding: "2px 8px" }}>ONDC Verified · Beckn Protocol</span>
-                </div>
-                <div style={{ textAlign: "center" }}>
-                  <ScoreRing score={84.7} />
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>TOPSIS Score</div>
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: 12, marginTop: 16 }}>
-                {[
-                  { icon: "📦", val: "₹380", label: "Price" },
-                  { icon: "💨", val: "3 days", label: "Delivery" },
-                  { icon: "⭐", val: "4.5", label: "Rating" },
-                  { icon: "💳", val: "✓", label: "Credit" },
-                ].map((s, i) => (
-                  <div key={i} style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 14, marginBottom: 2 }}>{s.icon}</div>
-                    <div style={{ fontFamily: S.mono, fontSize: 16, fontWeight: 600 }}>{s.val}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{s.label}</div>
+            {/* ── TOPSIS Chart ── */}
+            {(() => {
+              // Use live ranked_options; fall back to hardcoded ONDC
+              const chartData = (apiRankedOptions ?? ONDC).map(o => ({
+                name: o.name.substring(0, 12),
+                score: "topsis_score" in o
+                  ? Math.round((o as ApiProvider).topsis_score * 100 * 10) / 10
+                  : (o as typeof ONDC[0]).score,
+              }));
+              const topScore = chartData[0]?.score ?? 84.7;
+              // Criteria weights label
+              const weights = apiCriteriaWeights;
+              const weightsLabel = weights
+                ? Object.entries(weights).map(([k, v]) => `${k.replace("_inr","").replace("_"," ")} ${Math.round(v*100)}%`).join(" · ")
+                : "Price 35% · Time 25% · Rating 25% · Credit 15%";
+              return (
+                <div style={{ ...S.glass, padding: 20, marginTop: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+                    <span style={{ fontFamily: S.serif, fontSize: 18 }}>TOPSIS Ranked Results</span>
+                    <span style={{ fontSize: 11, color: "var(--saffron)", background: "rgba(249,115,22,0.08)", border: "1px solid rgba(249,115,22,0.2)", borderRadius: 999, padding: "4px 12px" }}>{weightsLabel}</span>
                   </div>
-                ))}
-              </div>
-              <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12, marginTop: 12 }}>
-                <AudioWaveform playing={audioPlaying} />
-                <p style={{ fontFamily: S.hindi, fontSize: "0.95rem", lineHeight: 1.9, color: "#F1F5F9", marginTop: 8 }}>
-                  {showEnglish ? ENGLISH_RESPONSES.procurement : HINDI_RESPONSES.procurement.slice(0, hindiCharIndex)}
-                  {!showEnglish && hindiCharIndex < HINDI_RESPONSES.procurement.length && <span style={{ opacity: 0.5 }}>▌</span>}
-                </p>
-                <button onClick={() => setShowEnglish(!showEnglish)} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6 }}>{showEnglish ? "हिंदी" : "EN"}</button>
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}><SafetyBadge delayed={false} /></div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
-                <button style={{ background: "var(--saffron)", color: "white", border: "none", borderRadius: 10, padding: 12, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>✓ Confirm & Proceed</button>
-                <button onClick={resetToIdle} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 12, fontSize: 14, color: "var(--text-secondary)", cursor: "pointer" }}>← Ask Again</button>
-              </div>
-            </div>
-            <div style={{ marginTop: 16 }}>
-              <button onClick={() => setShowAllOptions(!showAllOptions)} style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
-                View all 7 options {showAllOptions ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
-              {showAllOptions && (
-                <div style={{ ...S.glass, marginTop: 8, overflow: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 4px" }}>
-                    <thead>
-                      <tr>{["Rank","Provider","Price","Days","Rating","Credit","TOPSIS"].map(h => (
-                        <th key={h} style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", padding: "8px 12px", textAlign: "left", fontWeight: 400 }}>{h}</th>
-                      ))}</tr>
-                    </thead>
-                    <tbody>
-                      {ONDC.map((o, i) => (
-                        <tr key={o.id} style={{ background: i === 0 ? "rgba(249,115,22,0.06)" : i % 2 === 0 ? "rgba(255,255,255,0.01)" : "transparent" }}>
-                          <td style={{ padding: "8px 12px", fontFamily: S.mono, color: i === 0 ? "var(--saffron)" : "var(--text-primary)" }}>{o.rank}</td>
-                          <td style={{ padding: "8px 12px", fontSize: 13 }}>{o.name}</td>
-                          <td style={{ padding: "8px 12px", fontFamily: S.mono }}>₹{o.price}</td>
-                          <td style={{ padding: "8px 12px", fontFamily: S.mono }}>{o.days}</td>
-                          <td style={{ padding: "8px 12px", color: "var(--amber)" }}>{o.rating} ⭐</td>
-                          <td style={{ padding: "8px 12px", color: o.credit ? "var(--emerald)" : "var(--text-muted)" }}>{o.credit ? "✓" : "–"}</td>
-                          <td style={{ padding: "8px 12px", fontFamily: S.mono, color: i === 0 ? "var(--saffron)" : "var(--text-primary)" }}>{o.score}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94A3B8" }} axisLine={false} tickLine={false} />
+                      <YAxis domain={[0, 100]} tick={{ fontFamily: S.mono, fontSize: 10, fill: "#475569" }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v + "%"} />
+                      <Tooltip content={({ active, payload }) => active && payload?.[0] ? (
+                        <div style={{ background: "#141B2D", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 12px" }}>
+                          <div style={{ fontSize: 12 }}>{(payload[0].payload as any).name}</div>
+                          <div style={{ fontFamily: S.mono, fontSize: 14, color: "var(--saffron)" }}>Score: {payload[0].value}%</div>
+                        </div>
+                      ) : null} />
+                      <ReferenceLine y={topScore} stroke="rgba(249,115,22,0.5)" strokeDasharray="4 4" />
+                      <Bar dataKey="score" fill="#F97316" radius={[6, 6, 0, 0]} animationDuration={800} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-              )}
-            </div>
+              );
+            })()}
+
+            {/* ── Top Pick Card ── */}
+            {(() => {
+              const p = apiTopPick;
+              const name    = p?.name        ?? "Ekart Logistics";
+              const price   = p?.price_inr   ?? 380;
+              const days    = p?.delivery_days ?? 3;
+              const rating  = p?.rating      ?? 4.5;
+              const credit  = p ? Boolean(p.accepts_credit) : true;
+              const score   = p ? Math.round(p.topsis_score * 100 * 10) / 10 : 84.7;
+              const safety  = apiSafetyScore ?? 0.95;
+              const hindiText = apiHindiExplanation || HINDI_RESPONSES.procurement;
+              return (
+                <div style={{ ...S.glass, borderLeft: "4px solid var(--saffron)", padding: 24, marginTop: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
+                    <div>
+                      <span style={{ background: "rgba(249,115,22,0.15)", color: "var(--saffron)", fontSize: 11, borderRadius: 999, padding: "4px 10px", fontWeight: 600 }}>🏆 #1 Recommendation</span>
+                      <div style={{ fontFamily: S.serif, fontSize: 22, marginTop: 8 }}>{name}</div>
+                      <span style={{ fontSize: 11, color: "var(--blue)", background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 999, padding: "2px 8px" }}>ONDC Verified · Beckn Protocol</span>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <ScoreRing score={score} />
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>TOPSIS Score</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: 12, marginTop: 16 }}>
+                    {[
+                      { icon: "📦", val: `₹${price}`,    label: "Price" },
+                      { icon: "💨", val: `${days} days`,  label: "Delivery" },
+                      { icon: "⭐", val: String(rating),  label: "Rating" },
+                      { icon: "💳", val: credit ? "✓" : "–", label: "Credit" },
+                    ].map((s, i) => (
+                      <div key={i} style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: 14, marginBottom: 2 }}>{s.icon}</div>
+                        <div style={{ fontFamily: S.mono, fontSize: 16, fontWeight: 600 }}>{s.val}</div>
+                        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12, marginTop: 12 }}>
+                    <AudioWaveform playing={audioPlaying} />
+                    <p style={{ fontFamily: S.hindi, fontSize: "0.95rem", lineHeight: 1.9, color: "#F1F5F9", marginTop: 8 }}>
+                      {showEnglish ? ENGLISH_RESPONSES.procurement : hindiText.slice(0, hindiCharIndex)}
+                      {!showEnglish && hindiCharIndex < hindiText.length && <span style={{ opacity: 0.5 }}>▌</span>}
+                    </p>
+                    <button onClick={() => setShowEnglish(!showEnglish)} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6 }}>{showEnglish ? "हिंदी" : "EN"}</button>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}><SafetyBadge score={safety} delayed={false} /></div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
+                    <button style={{ background: "var(--saffron)", color: "white", border: "none", borderRadius: 10, padding: 12, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>✓ Confirm & Proceed</button>
+                    <button onClick={resetToIdle} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 12, fontSize: 14, color: "var(--text-secondary)", cursor: "pointer" }}>← Ask Again</button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── All Options Table ── */}
+            {(() => {
+              const options = apiRankedOptions ?? ONDC;
+              return (
+                <div style={{ marginTop: 16 }}>
+                  <button onClick={() => setShowAllOptions(!showAllOptions)} style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                    View all {options.length} options {showAllOptions ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  {showAllOptions && (
+                    <div style={{ ...S.glass, marginTop: 8, overflow: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 4px" }}>
+                        <thead>
+                          <tr>{["Rank","Provider","Price","Days","Rating","Credit","TOPSIS"].map(h => (
+                            <th key={h} style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", padding: "8px 12px", textAlign: "left", fontWeight: 400 }}>{h}</th>
+                          ))}</tr>
+                        </thead>
+                        <tbody>
+                          {"topsis_score" in options[0]
+                            ? (options as ApiProvider[]).map((o, i) => (
+                                <tr key={o.providerId} style={{ background: i === 0 ? "rgba(249,115,22,0.06)" : i % 2 === 0 ? "rgba(255,255,255,0.01)" : "transparent" }}>
+                                  <td style={{ padding: "8px 12px", fontFamily: S.mono, color: i === 0 ? "var(--saffron)" : "var(--text-primary)" }}>{i + 1}</td>
+                                  <td style={{ padding: "8px 12px", fontSize: 13 }}>{o.name}</td>
+                                  <td style={{ padding: "8px 12px", fontFamily: S.mono }}>₹{o.price_inr}</td>
+                                  <td style={{ padding: "8px 12px", fontFamily: S.mono }}>{o.delivery_days}</td>
+                                  <td style={{ padding: "8px 12px", color: "var(--amber)" }}>{o.rating} ⭐</td>
+                                  <td style={{ padding: "8px 12px", color: Boolean(o.accepts_credit) ? "var(--emerald)" : "var(--text-muted)" }}>{Boolean(o.accepts_credit) ? "✓" : "–"}</td>
+                                  <td style={{ padding: "8px 12px", fontFamily: S.mono, color: i === 0 ? "var(--saffron)" : "var(--text-primary)" }}>
+                                    {Math.round(o.topsis_score * 100 * 10) / 10}%
+                                  </td>
+                                </tr>
+                              ))
+                            : (options as typeof ONDC).map((o, i) => (
+                                <tr key={o.id} style={{ background: i === 0 ? "rgba(249,115,22,0.06)" : i % 2 === 0 ? "rgba(255,255,255,0.01)" : "transparent" }}>
+                                  <td style={{ padding: "8px 12px", fontFamily: S.mono, color: i === 0 ? "var(--saffron)" : "var(--text-primary)" }}>{o.rank}</td>
+                                  <td style={{ padding: "8px 12px", fontSize: 13 }}>{o.name}</td>
+                                  <td style={{ padding: "8px 12px", fontFamily: S.mono }}>₹{o.price}</td>
+                                  <td style={{ padding: "8px 12px", fontFamily: S.mono }}>{o.days}</td>
+                                  <td style={{ padding: "8px 12px", color: "var(--amber)" }}>{o.rating} ⭐</td>
+                                  <td style={{ padding: "8px 12px", color: o.credit ? "var(--emerald)" : "var(--text-muted)" }}>{o.credit ? "✓" : "–"}</td>
+                                  <td style={{ padding: "8px 12px", fontFamily: S.mono, color: i === 0 ? "var(--saffron)" : "var(--text-primary)" }}>{o.score}%</td>
+                                </tr>
+                              ))
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </>
         )}
       </div>
