@@ -226,6 +226,7 @@ export default function ShramSetuSaathi() {
   const [processingStep, setProcessingStep] = useState(0);
   const [showAllOptions, setShowAllOptions] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioReadyToPlay, setAudioReadyToPlay] = useState(false); // triggers autoplay when TTS arrives
   const [hindiCharIndex, setHindiCharIndex] = useState(0);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [selectedLang, setSelectedLang] = useState("हिंदी");
@@ -353,6 +354,14 @@ export default function ShramSetuSaathi() {
     setInterimText("");
     setSarvamSTTStatus("idle");
     audioChunksRef.current = [];
+
+    // ── AUTOPLAY UNLOCK ──
+    // Play a silent 0.1s audio RIGHT NOW while we're still inside the user
+    // gesture call stack. This permanently unlocks autoplay for this page
+    // session — any subsequent .play() call (including Sarvam TTS returning
+    // 10 seconds later) will succeed without a new gesture.
+    const silent = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
+    silent.play().catch(() => {});
 
     // Request mic permission
     let stream: MediaStream;
@@ -501,12 +510,8 @@ export default function ShramSetuSaathi() {
         const sarvamAudio = await callSarvamTTS(hindiText);
         if (sarvamAudio) {
           audioRef.current = sarvamAudio;
-          setApiAudioUrl("sarvam"); // non-null sentinel so UI shows replay button
-          // Prime: play→pause to unlock for deferred autoplay
-          sarvamAudio.play().then(() => {
-            sarvamAudio.pause();
-            sarvamAudio.currentTime = 0;
-          }).catch(() => {});
+          setApiAudioUrl("sarvam");
+          setAudioReadyToPlay(true); // signal useEffect — audio is ready
         } else {
           // Sarvam TTS failed — fall back to backend Polly URL if present
           const pollyUrl = data.ttsResult?.body?.audioUrl ?? null;
@@ -516,7 +521,7 @@ export default function ShramSetuSaathi() {
             audio.preload = "auto";
             audio.onended = () => setAudioPlaying(false);
             audioRef.current = audio;
-            audio.play().then(() => { audio.pause(); audio.currentTime = 0; }).catch(() => {});
+            setAudioReadyToPlay(true);
           }
         }
       } else {
@@ -528,7 +533,7 @@ export default function ShramSetuSaathi() {
           audio.preload = "auto";
           audio.onended = () => setAudioPlaying(false);
           audioRef.current = audio;
-          audio.play().then(() => { audio.pause(); audio.currentTime = 0; }).catch(() => {});
+          setAudioReadyToPlay(true);
         }
       }
 
@@ -608,9 +613,13 @@ export default function ShramSetuSaathi() {
 
   // ─────────────────────────────────────────────
   //  AUTO-PLAY TTS AUDIO when results appear
+  //  Fires when BOTH conditions are true:
+  //    1. appState === "results"  (animation done)
+  //    2. audioReadyToPlay       (TTS download done)
+  //  Whichever arrives last triggers the play.
   // ─────────────────────────────────────────────
   useEffect(() => {
-    if (appState !== "results") return;
+    if (appState !== "results" || !audioReadyToPlay) return;
 
     const audio = audioRef.current;
     if (audio) {
@@ -618,24 +627,20 @@ export default function ShramSetuSaathi() {
         audio.currentTime = 0;
         setAudioPlaying(true);
         audio.play().catch(() => {
-          // Autoplay still blocked — waveform animates for estimated duration
           setTimeout(() => setAudioPlaying(false), 3000);
         });
       };
-
-      // If audio is already loaded (HAVE_ENOUGH_DATA = 4), play immediately
-      // Otherwise wait for canplaythrough to fire
       if (audio.readyState >= 4) {
         triggerPlay();
       } else {
         audio.addEventListener("canplaythrough", triggerPlay, { once: true });
       }
     } else {
-      // No audio (API failed / demo mode) — animate waveform for 3s
+      // No audio at all — just animate waveform
       setAudioPlaying(true);
       setTimeout(() => setAudioPlaying(false), 3000);
     }
-  }, [appState]);
+  }, [appState, audioReadyToPlay]);
 
   // ─────────────────────────────────────────────
   //  TYPEWRITER for Hindi response
@@ -693,6 +698,7 @@ export default function ShramSetuSaathi() {
       audioRef.current = null;
     }
     setSarvamSTTStatus("idle");
+    setAudioReadyToPlay(false);
     setAppState("idle");
     setCurrentQuery("");
     setTextInput("");
