@@ -356,10 +356,6 @@ export default function ShramSetuSaathi() {
     audioChunksRef.current = [];
 
     // ── AUTOPLAY UNLOCK ──
-    // Play a silent 0.1s audio RIGHT NOW while we're still inside the user
-    // gesture call stack. This permanently unlocks autoplay for this page
-    // session — any subsequent .play() call (including Sarvam TTS returning
-    // 10 seconds later) will succeed without a new gesture.
     const silent = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
     silent.play().catch(() => {});
 
@@ -376,15 +372,11 @@ export default function ShramSetuSaathi() {
       return;
     }
 
-    // Pick best supported mime type.
-    // IMPORTANT: use "audio/webm;codecs=opus" for MediaRecorder quality,
-    // but strip the codec suffix before sending to Sarvam (it rejects it).
     const recorderMime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
       : MediaRecorder.isTypeSupported("audio/webm")
       ? "audio/webm"
       : "audio/mp4";
-    // Sarvam-safe mime — strip codec suffix e.g. "audio/webm;codecs=opus" → "audio/webm"
     const sarvamMime = recorderMime.split(";")[0];
 
     const recorder = new MediaRecorder(stream, { mimeType: recorderMime });
@@ -394,20 +386,16 @@ export default function ShramSetuSaathi() {
     };
 
     recorder.onstop = async () => {
-      // Stop all mic tracks immediately
       stream.getTracks().forEach(t => t.stop());
 
-      // Re-create blob with Sarvam-safe mime (no codec suffix)
       const blob = new Blob(audioChunksRef.current, { type: sarvamMime });
       if (blob.size < 1000) {
-        // Too short — nothing was said
         setInterimText("");
         setAppState("idle");
         setSarvamSTTStatus("idle");
         return;
       }
 
-      // Show "Transcribing..." UI while Sarvam processes
       setInterimText("सुन रहा हूँ... / Transcribing...");
 
       const asrMs = Date.now() - asrStartRef.current;
@@ -420,12 +408,73 @@ export default function ShramSetuSaathi() {
         setAppState("processing");
         callAPIRef.current?.(transcript, asrMs);
       } else {
-        // Sarvam STT failed — fall back to empty and let user retry
         setInterimText("");
         setSpeechError("Could not understand audio. Please speak clearly and try again.");
         setAppState("error");
       }
     };
+
+    // ── VOICE ACTIVITY DETECTION ──
+    // Mirror webkitSpeechRecognition UX: auto-stop after 1.5s of silence.
+    // Uses Web Audio AnalyserNode to measure RMS volume 30× per second.
+    const VAD_SILENCE_MS   = 1500;  // stop after this much continuous silence
+    const VAD_SPEECH_MS    = 300;   // must hear speech for this long before VAD activates
+    const VAD_THRESHOLD    = 10;    // RMS below this = silence (0–255 scale)
+
+    const audioCtx  = new AudioContext();
+    const source    = audioCtx.createMediaStreamSource(stream);
+    const analyser  = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+
+    const dataArray  = new Uint8Array(analyser.frequencyBinCount);
+    let silenceStart = 0;
+    let speechDetected = false;   // VAD only activates after user has spoken
+    let speechStart  = 0;
+    let vadActive    = true;
+
+    const checkVAD = () => {
+      if (!vadActive) return;
+
+      analyser.getByteFrequencyData(dataArray);
+      // RMS of frequency bins
+      const rms = Math.sqrt(dataArray.reduce((s, v) => s + v * v, 0) / dataArray.length);
+      const now = Date.now();
+
+      if (rms > VAD_THRESHOLD) {
+        // Sound detected
+        silenceStart = 0;
+        if (!speechDetected) {
+          if (speechStart === 0) speechStart = now;
+          if (now - speechStart >= VAD_SPEECH_MS) {
+            speechDetected = true;   // user has spoken long enough — VAD now armed
+          }
+        }
+      } else {
+        // Silence
+        if (speechDetected) {
+          if (silenceStart === 0) silenceStart = now;
+          if (now - silenceStart >= VAD_SILENCE_MS) {
+            // Auto-stop: user spoke then went silent
+            vadActive = false;
+            audioCtx.close();
+            if (mediaRecorderRef.current?.state === "recording") {
+              mediaRecorderRef.current.stop();
+              mediaRecorderRef.current = null;
+            }
+            return;
+          }
+        } else {
+          // Reset speech detection if silence before speech
+          speechStart = 0;
+        }
+      }
+
+      requestAnimationFrame(checkVAD);
+    };
+
+    // Give the recorder a 300ms head start before VAD begins sampling
+    setTimeout(() => requestAnimationFrame(checkVAD), 300);
 
     asrStartRef.current = Date.now();
     recorder.start();
