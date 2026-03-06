@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
@@ -10,7 +10,7 @@ import {
 
 // ─── TYPES ───
 type UIMode = "voice" | "dashboard";
-type AppState = "idle" | "recording" | "processing" | "results" | "error";
+type AppState = "idle" | "recording" | "processing" | "results" | "confirmed" | "error";
 type ActiveTab = "procurement" | "credit" | "safety";
 
 // ─── API RESPONSE TYPES ───
@@ -24,6 +24,8 @@ interface ApiProvider {
   topsis_score: number;
   commission_pct?: number;
   coverage_pincode?: string;
+  whatsapp?: string;   // E.164 without +, e.g. "918069275000"
+  phone?: string;      // E.164 without +, for tel: link
 }
 
 interface ApiResponse {
@@ -127,12 +129,28 @@ const RAVI = {
   ]
 };
 
+// Provider contact details — WhatsApp Business lines + customer care numbers
+// whatsapp: E.164 without '+' for wa.me links
+// phone: E.164 without '+' for tel: links
+const PROVIDER_CONTACTS: Record<string, { whatsapp: string; phone: string }> = {
+  "XpressBees":        { whatsapp: "918069275000", phone: "918069275000" },
+  "Delhivery":         { whatsapp: "918069650100", phone: "918069650100" },
+  "Delhivery Express": { whatsapp: "918069650100", phone: "918069650100" },
+  "Ekart Logistics":   { whatsapp: "918067272700", phone: "918067272700" },
+  "DTDC":              { whatsapp: "919004022000", phone: "919004022000" },
+  "DTDC Premium":      { whatsapp: "919004022000", phone: "919004022000" },
+  "Blue Dart":         { whatsapp: "911860042333",  phone: "911860042333" },
+  "Shadowfax":         { whatsapp: "918068575050", phone: "918068575050" },
+  "Namma Cargo Co-op": { whatsapp: "918026543210", phone: "918026543210" },
+  "ONDC Credit Co-op": { whatsapp: "918022334455", phone: "918022334455" },
+};
+
 const ONDC = [
-  { id: 1, name: "Ekart Logistics", price: 380, days: 3, rating: 4.5, credit: true, score: 84.7, rank: 1 },
-  { id: 2, name: "ONDC Credit Co-op", price: 320, days: 3, rating: 3.5, credit: true, score: 71.2, rank: 2 },
-  { id: 3, name: "Namma Cargo Co-op", price: 320, days: 3, rating: 3.5, credit: true, score: 68.4, rank: 3 },
-  { id: 4, name: "DTDC Premium", price: 410, days: 2, rating: 4.0, credit: false, score: 54.1, rank: 4 },
-  { id: 5, name: "Delhivery Express", price: 450, days: 2, rating: 4.2, credit: true, score: 49.8, rank: 5 },
+  { id: 1, name: "Ekart Logistics",   price: 380, days: 3, rating: 4.5, credit: true,  score: 84.7, rank: 1 },
+  { id: 2, name: "ONDC Credit Co-op", price: 320, days: 3, rating: 3.5, credit: true,  score: 71.2, rank: 2 },
+  { id: 3, name: "Namma Cargo Co-op", price: 320, days: 3, rating: 3.5, credit: true,  score: 68.4, rank: 3 },
+  { id: 4, name: "DTDC Premium",      price: 410, days: 2, rating: 4.0, credit: false, score: 54.1, rank: 4 },
+  { id: 5, name: "Delhivery Express", price: 450, days: 2, rating: 4.2, credit: true,  score: 49.8, rank: 5 },
   { id: 6, name: "ShipRocket Economy", price: 350, days: 4, rating: 4.1, credit: false, score: 44.2, rank: 6 },
   { id: 7, name: "Karnataka Local", price: 280, days: 4, rating: 3.8, credit: false, score: 38.9, rank: 7 },
 ];
@@ -226,7 +244,8 @@ export default function ShramSetuSaathi() {
   const [processingStep, setProcessingStep] = useState(0);
   const [showAllOptions, setShowAllOptions] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
-  const [audioReadyToPlay, setAudioReadyToPlay] = useState(false); // triggers autoplay when TTS arrives
+  const [audioReadyToPlay, setAudioReadyToPlay] = useState(false);
+  const [apiDataReady, setApiDataReady] = useState(false); // true once API response parsed
   const [hindiCharIndex, setHindiCharIndex] = useState(0);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [selectedLang, setSelectedLang] = useState("हिंदी");
@@ -269,6 +288,7 @@ export default function ShramSetuSaathi() {
   // Ref that always points to the latest callAPI — breaks the circular
   // useCallback dependency (startRecording is declared before callAPI)
   const callAPIRef = useRef<((query: string, asrMs?: number) => Promise<void>) | null>(null);
+  const apiDataReadyRef = useRef(false); // mirrors apiDataReady for use inside setTimeout closures
 
   // Sarvam STT — show "Transcribing..." between stop-tap and backend call
   const [sarvamSTTStatus, setSarvamSTTStatus] = useState<"idle" | "transcribing" | "done">("idle");
@@ -356,10 +376,6 @@ export default function ShramSetuSaathi() {
     audioChunksRef.current = [];
 
     // ── AUTOPLAY UNLOCK ──
-    // Play a silent 0.1s audio RIGHT NOW while we're still inside the user
-    // gesture call stack. This permanently unlocks autoplay for this page
-    // session — any subsequent .play() call (including Sarvam TTS returning
-    // 10 seconds later) will succeed without a new gesture.
     const silent = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
     silent.play().catch(() => {});
 
@@ -376,15 +392,11 @@ export default function ShramSetuSaathi() {
       return;
     }
 
-    // Pick best supported mime type.
-    // IMPORTANT: use "audio/webm;codecs=opus" for MediaRecorder quality,
-    // but strip the codec suffix before sending to Sarvam (it rejects it).
     const recorderMime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
       : MediaRecorder.isTypeSupported("audio/webm")
       ? "audio/webm"
       : "audio/mp4";
-    // Sarvam-safe mime — strip codec suffix e.g. "audio/webm;codecs=opus" → "audio/webm"
     const sarvamMime = recorderMime.split(";")[0];
 
     const recorder = new MediaRecorder(stream, { mimeType: recorderMime });
@@ -394,20 +406,16 @@ export default function ShramSetuSaathi() {
     };
 
     recorder.onstop = async () => {
-      // Stop all mic tracks immediately
       stream.getTracks().forEach(t => t.stop());
 
-      // Re-create blob with Sarvam-safe mime (no codec suffix)
       const blob = new Blob(audioChunksRef.current, { type: sarvamMime });
       if (blob.size < 1000) {
-        // Too short — nothing was said
         setInterimText("");
         setAppState("idle");
         setSarvamSTTStatus("idle");
         return;
       }
 
-      // Show "Transcribing..." UI while Sarvam processes
       setInterimText("सुन रहा हूँ... / Transcribing...");
 
       const asrMs = Date.now() - asrStartRef.current;
@@ -417,15 +425,79 @@ export default function ShramSetuSaathi() {
         setCurrentQuery(transcript);
         setTextInput(transcript);
         setInterimText(transcript);
+        setApiDataReady(false);
+        apiDataReadyRef.current = false;
+        setAudioReadyToPlay(false);
         setAppState("processing");
         callAPIRef.current?.(transcript, asrMs);
       } else {
-        // Sarvam STT failed — fall back to empty and let user retry
         setInterimText("");
         setSpeechError("Could not understand audio. Please speak clearly and try again.");
         setAppState("error");
       }
     };
+
+    // ── VOICE ACTIVITY DETECTION ──
+    // Mirror webkitSpeechRecognition UX: auto-stop after 1.5s of silence.
+    // Uses Web Audio AnalyserNode to measure RMS volume 30× per second.
+    const VAD_SILENCE_MS   = 1500;  // stop after this much continuous silence
+    const VAD_SPEECH_MS    = 300;   // must hear speech for this long before VAD activates
+    const VAD_THRESHOLD    = 10;    // RMS below this = silence (0–255 scale)
+
+    const audioCtx  = new AudioContext();
+    const source    = audioCtx.createMediaStreamSource(stream);
+    const analyser  = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+
+    const dataArray  = new Uint8Array(analyser.frequencyBinCount);
+    let silenceStart = 0;
+    let speechDetected = false;   // VAD only activates after user has spoken
+    let speechStart  = 0;
+    let vadActive    = true;
+
+    const checkVAD = () => {
+      if (!vadActive) return;
+
+      analyser.getByteFrequencyData(dataArray);
+      // RMS of frequency bins
+      const rms = Math.sqrt(dataArray.reduce((s, v) => s + v * v, 0) / dataArray.length);
+      const now = Date.now();
+
+      if (rms > VAD_THRESHOLD) {
+        // Sound detected
+        silenceStart = 0;
+        if (!speechDetected) {
+          if (speechStart === 0) speechStart = now;
+          if (now - speechStart >= VAD_SPEECH_MS) {
+            speechDetected = true;   // user has spoken long enough — VAD now armed
+          }
+        }
+      } else {
+        // Silence
+        if (speechDetected) {
+          if (silenceStart === 0) silenceStart = now;
+          if (now - silenceStart >= VAD_SILENCE_MS) {
+            // Auto-stop: user spoke then went silent
+            vadActive = false;
+            audioCtx.close();
+            if (mediaRecorderRef.current?.state === "recording") {
+              mediaRecorderRef.current.stop();
+              mediaRecorderRef.current = null;
+            }
+            return;
+          }
+        } else {
+          // Reset speech detection if silence before speech
+          speechStart = 0;
+        }
+      }
+
+      requestAnimationFrame(checkVAD);
+    };
+
+    // Give the recorder a 300ms head start before VAD begins sampling
+    setTimeout(() => requestAnimationFrame(checkVAD), 300);
 
     asrStartRef.current = Date.now();
     recorder.start();
@@ -553,9 +625,15 @@ export default function ShramSetuSaathi() {
       setShowLatency(true);
       setTimeout(() => setShowLatency(false), 8000);
 
+      // ── Signal that real API data is loaded — safe to show results now ──
+      apiDataReadyRef.current = true;
+      setApiDataReady(true);
+
     } catch (err) {
-      // Non-fatal — demo data will display, just show simulated latency
+      // API failed — flag as ready so hardcoded fallback data shows
       console.warn("API call failed, falling back to demo data:", err);
+      apiDataReadyRef.current = true;
+      setApiDataReady(true);
       const aiSec  = (1.2 + Math.random() * 0.5).toFixed(1);
       const ttsSec = (0.4 + Math.random() * 0.3).toFixed(1);
       setLatencyData({
@@ -578,6 +656,9 @@ export default function ShramSetuSaathi() {
     setCurrentQuery(q);
     setTextInput(q);
     setInterimText(q);
+    setApiDataReady(false);
+    apiDataReadyRef.current = false;
+    setAudioReadyToPlay(false);
     setTimeout(() => {
       setAppState("processing");
       callAPI(q);
@@ -596,20 +677,46 @@ export default function ShramSetuSaathi() {
     setScoreAnimated(false);
     setNeedleAnimated(false);
     let step = 0;
+    let animationDone = false;
+
+    const showResults = () => {
+      setAppState("results");
+      setTimeout(() => setScoreAnimated(true), 100);
+      setTimeout(() => setNeedleAnimated(true), 100);
+    };
+
     const iv = setInterval(() => {
       step++;
       setProcessingStep(step);
       if (step >= 6) {
         clearInterval(iv);
+        animationDone = true;
+        // Only transition if API data has also arrived
+        if (apiDataReadyRef.current) {
+          setTimeout(showResults, 400);
+        }
+        // Otherwise: the apiDataReady useEffect below will call showResults
+      }
+    }, 400);
+    return () => clearInterval(iv);
+  }, [appState]);
+
+  // When API data arrives after animation has already finished, show results now
+  useEffect(() => {
+    if (!apiDataReady || appState !== "processing") return;
+    // Check that pipeline animation is also done (step 6)
+    // processingStep is updated via state so read it directly
+    setProcessingStep(prev => {
+      if (prev >= 6) {
         setTimeout(() => {
           setAppState("results");
           setTimeout(() => setScoreAnimated(true), 100);
           setTimeout(() => setNeedleAnimated(true), 100);
         }, 400);
       }
-    }, 400);
-    return () => clearInterval(iv);
-  }, [appState]);
+      return prev;
+    });
+  }, [apiDataReady]);
 
   // ─────────────────────────────────────────────
   //  AUTO-PLAY TTS AUDIO when results appear
@@ -699,6 +806,8 @@ export default function ShramSetuSaathi() {
     }
     setSarvamSTTStatus("idle");
     setAudioReadyToPlay(false);
+    setApiDataReady(false);
+    apiDataReadyRef.current = false;
     setAppState("idle");
     setCurrentQuery("");
     setTextInput("");
@@ -1029,6 +1138,75 @@ export default function ShramSetuSaathi() {
     const safetyScore = apiSafetyScore ?? (activeTab === "safety" ? 0.91 : 0.95);
     const pick = apiTopPick; // null = use hardcoded
 
+    // ── GENERAL INTENT: show conversational answer only, no provider card ──
+    const isGeneral = apiIntentType === "general" || (!pick && !apiRankedOptions?.length && !!apiHindiExplanation);
+    if (isGeneral) {
+      return (
+        <div style={{
+          ...S.glass, padding: compact ? 20 : 24, maxWidth: compact ? 480 : "100%",
+          margin: compact ? "0 auto" : 0,
+          borderLeft: "4px solid var(--blue)",
+          animation: "fadeInUp 0.5s cubic-bezier(0.34,1.56,0.64,1)",
+        }}>
+          {/* Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+            <span style={{
+              background: "rgba(59,130,246,0.15)", color: "var(--blue)",
+              fontSize: 11, borderRadius: 999, padding: "4px 10px", fontWeight: 600,
+            }}>💬 Saathi का जवाब</span>
+            <SafetyBadge score={safetyScore} />
+          </div>
+
+          {/* Audio + explanation */}
+          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <Volume2 size={16} color="var(--blue)" />
+              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Saathi कह रहा है:</span>
+            </div>
+            <AudioWaveform playing={audioPlaying} />
+            {!audioPlaying && appState === "results" && (
+              <button
+                onClick={() => {
+                  if (audioRef.current) {
+                    audioRef.current.currentTime = 0;
+                    setAudioPlaying(true);
+                    audioRef.current.play().catch(() => setTimeout(() => setAudioPlaying(false), 3000));
+                  }
+                }}
+                style={{
+                  background: "none", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 8,
+                  padding: "4px 12px", color: "var(--blue)", fontSize: 12, cursor: "pointer", marginTop: 6,
+                }}>🔊 फिर सुनें</button>
+            )}
+            <p style={{
+              fontFamily: S.hindi, fontSize: "0.95rem", lineHeight: 1.9, color: "#F1F5F9",
+              marginTop: 10, minHeight: 40,
+            }}>
+              {showEnglish ? displayText : displayText}
+              {hindiCharIndex < liveHindi.length && <span style={{ opacity: 0.5 }}>▌</span>}
+            </p>
+            {interimText && (
+              <div style={{
+                fontSize: 11, color: "var(--text-muted)", marginTop: 6,
+                fontFamily: S.mono, background: "rgba(255,255,255,0.03)",
+                borderRadius: 6, padding: "4px 10px",
+              }}>🎙 "{interimText}"</div>
+            )}
+          </div>
+
+          {/* Single "Ask Again" button — no Confirm for general queries */}
+          <div style={{ marginTop: 16 }}>
+            <button onClick={resetToIdle} style={{
+              width: "100%", background: "transparent",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 10, padding: 12, fontSize: 14,
+              color: "var(--text-secondary)", cursor: "pointer",
+            }}>🎙 कुछ और पूछें · Ask Something Else</button>
+          </div>
+        </div>
+      );
+    }
+
     const topName = pick?.name
       ?? (activeTab === "procurement" ? "Ekart Logistics" : activeTab === "credit" ? "NanoFin Microloan" : "Overtime Rights");
 
@@ -1151,7 +1329,7 @@ export default function ShramSetuSaathi() {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
-          <button style={{
+          <button onClick={() => setAppState("confirmed")} style={{
             background: "var(--saffron)", color: "white", border: "none", borderRadius: 10,
             padding: 12, fontWeight: 600, fontSize: 14, cursor: "pointer",
           }}>✓ Confirm & Proceed</button>
@@ -1183,6 +1361,211 @@ export default function ShramSetuSaathi() {
             </div>
           </div>
         )}
+      </div>
+    );
+  };
+
+  // ─── CONFIRMED SCREEN ───
+  const ConfirmedScreen = () => {
+    const pick   = apiTopPick;
+    const name    = pick?.name          ?? "XpressBees";
+    const price   = pick?.price_inr     ?? 520;
+    const days    = pick?.delivery_days ?? 1;
+    const rating  = pick?.rating        ?? 4.6;
+    const score   = pick ? Math.round(pick.topsis_score * 100 * 10) / 10 : 61.0;
+    const query   = currentQuery || interimText;
+
+    // Look up contact — from API field first, then local map, then empty
+    const contacts = PROVIDER_CONTACTS[name] ?? { whatsapp: "", phone: "" };
+    const waNumber  = pick?.whatsapp  || contacts.whatsapp;
+    const phoneNum  = pick?.phone     || contacts.phone;
+
+    const waText = encodeURIComponent(
+      `Namaste! Mujhe yeh shipment book karni hai:\n\n` +
+      `📦 Provider: ${name}\n` +
+      `💰 Price: ₹${price}\n` +
+      `💨 Delivery: ${days} day${days > 1 ? "s" : ""}\n` +
+      `⭐ Rating: ${rating}\n` +
+      `📋 Requirement: "${query}"\n` +
+      `🏅 TOPSIS Score: ${score}%\n\n` +
+      `Powered by ShramSetu Saathi 🇮🇳`
+    );
+    // If we have a number, open direct chat; otherwise open share picker
+    const waUrl    = waNumber ? `https://wa.me/${waNumber}?text=${waText}` : `https://wa.me/?text=${waText}`;
+    const callUrl  = phoneNum ? `tel:+${phoneNum}` : null;
+
+    const btnBase: React.CSSProperties = {
+      display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+      width: "100%", padding: "14px 0", borderRadius: 12, marginBottom: 10,
+      fontWeight: 700, fontSize: 15, cursor: "pointer", border: "none",
+      textDecoration: "none", boxSizing: "border-box", transition: "all 200ms",
+    };
+
+    return (
+      <div style={{
+        minHeight: "100vh", display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        paddingTop: 56, paddingBottom: 80,
+        background: `radial-gradient(ellipse 400px 300px at 50% 50%, rgba(16,185,129,0.06) 0%, transparent 70%) var(--bg-base)`,
+      }}>
+        <div style={{
+          maxWidth: 420, width: "100%", padding: "0 20px",
+          animation: "fadeInUp 0.5s cubic-bezier(0.34,1.56,0.64,1)",
+        }}>
+
+          {/* ── Header ── */}
+          <div style={{ textAlign: "center", marginBottom: 28 }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: "50%", margin: "0 auto 16px",
+              background: "linear-gradient(135deg, rgba(16,185,129,0.2), rgba(16,185,129,0.05))",
+              border: "2px solid rgba(16,185,129,0.4)",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32,
+              boxShadow: "0 0 32px rgba(16,185,129,0.15)",
+            }}>✓</div>
+            <div style={{ fontFamily: S.hindi, fontSize: "1.4rem", fontWeight: 700, color: "var(--emerald)" }}>
+              बुकिंग Ready है!
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4 }}>
+              Best provider selected · Contact them below to confirm
+            </div>
+          </div>
+
+          {/* ── Order summary card ── */}
+          <div style={{ ...S.glass, borderLeft: "4px solid var(--emerald)", padding: 20, marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 11, color: "var(--emerald)", fontWeight: 600, marginBottom: 4 }}>🏆 Selected Provider</div>
+                <div style={{ fontFamily: S.serif, fontSize: 22 }}>{name}</div>
+                <span style={{
+                  fontSize: 11, color: "var(--blue)", background: "rgba(59,130,246,0.1)",
+                  border: "1px solid rgba(59,130,246,0.2)", borderRadius: 999, padding: "2px 8px",
+                }}>ONDC Verified · Beckn Protocol</span>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontFamily: S.mono, fontSize: 22, fontWeight: 700, color: "var(--saffron)" }}>{score}%</div>
+                <div style={{ fontSize: 10, color: "var(--text-muted)" }}>TOPSIS</div>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div style={{
+              display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8,
+              background: "rgba(255,255,255,0.02)", borderRadius: 10, padding: 12,
+            }}>
+              {[
+                { icon: "📦", val: `₹${price}`, label: "Price" },
+                { icon: "💨", val: `${days}d`,   label: "Delivery" },
+                { icon: "⭐", val: String(rating), label: "Rating" },
+                { icon: "💳", val: "✓",           label: "Credit" },
+              ].map((s, i) => (
+                <div key={i} style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 14, marginBottom: 2 }}>{s.icon}</div>
+                  <div style={{ fontFamily: S.mono, fontSize: 15, fontWeight: 600 }}>{s.val}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Query echo */}
+            <div style={{
+              marginTop: 12, padding: "8px 12px",
+              background: "rgba(255,255,255,0.03)", borderRadius: 8,
+              fontSize: 12, color: "var(--text-secondary)", fontFamily: S.hindi,
+            }}>🎙 "{query}"</div>
+
+            <div style={{ marginTop: 8, fontSize: 10, color: "var(--text-muted)", fontFamily: S.mono, textAlign: "right" }}>
+              Session · {sessionIdRef.current}
+            </div>
+          </div>
+
+          {/* ── Contact info strip ── */}
+          {(waNumber || phoneNum) && (
+            <div style={{
+              ...S.glass, padding: "10px 14px", marginBottom: 12,
+              display: "flex", alignItems: "center", gap: 8, fontSize: 12,
+            }}>
+              <span style={{ fontSize: 16 }}>📞</span>
+              <div>
+                <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>Provider contact</div>
+                <div style={{ fontFamily: S.mono, color: "white", fontSize: 13 }}>
+                  +{phoneNum || waNumber}
+                </div>
+              </div>
+              <div style={{ marginLeft: "auto", fontSize: 10, color: "var(--text-muted)", textAlign: "right" }}>
+                Customer Care<br/>Mon–Sat 9am–6pm
+              </div>
+            </div>
+          )}
+
+          {/* ── Action buttons ── */}
+
+          {/* WhatsApp */}
+          <a href={waUrl} target="_blank" rel="noopener noreferrer" style={{
+            ...btnBase, color: "white",
+            background: "linear-gradient(135deg, #25D366, #128C7E)",
+            boxShadow: "0 4px 20px rgba(37,211,102,0.3)",
+          }}
+            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.transform = "scale(1.02)"; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.transform = "scale(1)"; }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+              <path d="M12 0C5.373 0 0 5.373 0 12c0 2.126.553 4.122 1.519 5.858L.057 23.617a.75.75 0 00.918.918l5.759-1.462A11.945 11.945 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22c-1.907 0-3.7-.506-5.25-1.389l-.377-.214-3.917.995.995-3.917-.214-.377A9.959 9.959 0 012 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
+            </svg>
+            WhatsApp पर संपर्क करें
+            {waNumber && <span style={{ fontSize: 11, opacity: 0.8, fontWeight: 400 }}>· Direct Chat</span>}
+          </a>
+
+          {/* Call button — only if phone number known */}
+          {callUrl ? (
+            <a href={callUrl} style={{
+              ...btnBase, color: "white", marginBottom: 10,
+              background: "linear-gradient(135deg, #3B82F6, #1D4ED8)",
+              boxShadow: "0 4px 20px rgba(59,130,246,0.3)",
+            }}
+              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.transform = "scale(1.02)"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.transform = "scale(1)"; }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 10.8a19.79 19.79 0 01-3.07-8.67A2 2 0 012 0h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 14.92z"/>
+              </svg>
+              Call करें — {name}
+              <span style={{ fontSize: 11, opacity: 0.8, fontWeight: 400 }}>· +{phoneNum}</span>
+            </a>
+          ) : (
+            <div style={{
+              ...btnBase, marginBottom: 10, cursor: "default",
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              color: "var(--text-muted)", fontSize: 13,
+            }}>
+              📞 Call number not available for this provider
+            </div>
+          )}
+
+          {/* New Query */}
+          <button onClick={resetToIdle} style={{
+            ...btnBase, marginBottom: 0,
+            background: "transparent", border: "1px solid rgba(255,255,255,0.12)",
+            color: "var(--text-secondary)",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(249,115,22,0.4)"; e.currentTarget.style.color = "var(--saffron)"; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+          >
+            🎙 नई Query करें · New Query
+          </button>
+
+          {/* Trust footer */}
+          <div style={{
+            display: "flex", justifyContent: "center", gap: 16, marginTop: 20,
+            fontSize: 10, color: "var(--text-muted)",
+          }}>
+            {["🔒 Encrypted", "🇮🇳 ONDC Network", "⚡ Sarvam AI"].map(t => (
+              <span key={t}>{t}</span>
+            ))}
+          </div>
+
+        </div>
       </div>
     );
   };
@@ -1400,6 +1783,9 @@ export default function ShramSetuSaathi() {
       {/* ── RESULTS STATE ── */}
       {appState === "results" && <ResultCard compact={true} />}
 
+      {/* ── CONFIRMED STATE ── */}
+      {appState === "confirmed" && <ConfirmedScreen />}
+
       {/* ── ERROR STATE ── */}
       {appState === "error" && (
         <div style={{ ...S.glass, border: "2px solid var(--red)", padding: 32, textAlign: "center", maxWidth: 400 }}>
@@ -1522,7 +1908,7 @@ export default function ShramSetuSaathi() {
               // Criteria weights label
               const weights = apiCriteriaWeights;
               const weightsLabel = weights
-                ? Object.entries(weights).map(([k, v]) => `${k.replace("_inr","").replace("_"," ")} ${Math.round(v*100)}%`).join(" · ")
+                ? Object.entries(weights).map(([k, v]) => `${k.replace("_inr","").replace("_"," ")} ${Math.round((v as number)*100)}%`).join(" · ")
                 : "Price 35% · Time 25% · Rating 25% · Credit 15%";
               return (
                 <div style={{ ...S.glass, padding: 20, marginTop: 16 }}>
@@ -1597,7 +1983,7 @@ export default function ShramSetuSaathi() {
                   </div>
                   <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}><SafetyBadge score={safety} delayed={false} /></div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
-                    <button style={{ background: "var(--saffron)", color: "white", border: "none", borderRadius: 10, padding: 12, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>✓ Confirm & Proceed</button>
+                    <button onClick={() => setAppState("confirmed")} style={{ background: "var(--saffron)", color: "white", border: "none", borderRadius: 10, padding: 12, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>✓ Confirm & Proceed</button>
                     <button onClick={resetToIdle} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 12, fontSize: 14, color: "var(--text-secondary)", cursor: "pointer" }}>← Ask Again</button>
                   </div>
                 </div>
@@ -1729,7 +2115,7 @@ export default function ShramSetuSaathi() {
               </p>
               <button onClick={() => setShowEnglish(!showEnglish)} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6 }}>{showEnglish ? "हिंदी" : "EN"}</button>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
-                <button style={{ background: "var(--saffron)", color: "white", border: "none", borderRadius: 10, padding: 12, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>✓ Confirm & Proceed</button>
+                <button onClick={() => setAppState("confirmed")} style={{ background: "var(--saffron)", color: "white", border: "none", borderRadius: 10, padding: 12, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>✓ Confirm & Proceed</button>
                 <button onClick={resetToIdle} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 12, fontSize: 14, color: "var(--text-secondary)", cursor: "pointer" }}>← Ask Again</button>
               </div>
             </div>
@@ -1889,7 +2275,7 @@ export default function ShramSetuSaathi() {
             onClick={() => {
               if (appState === "recording") {
                 stopRecording();
-              } else if (appState === "idle" || appState === "results" || appState === "error") {
+              } else if (appState === "idle" || appState === "results" || appState === "confirmed" || appState === "error") {
                 startRecording();
               }
             }}
