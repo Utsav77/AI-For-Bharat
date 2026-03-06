@@ -113,6 +113,20 @@ const LANG_TO_CODE: Record<string, string> = {
   "বাংলা": "bn",
 };
 
+// Label shown on EN toggle button when switching back to native language
+const LANG_LABEL: Record<string, string> = {
+  "हिंदी": "हिंदी",
+  "ಕನ್ನಡ": "ಕನ್ನಡ",
+  "বাংলা": "বাংলা",
+};
+
+// Input bar placeholder per language
+const LANG_PLACEHOLDER: Record<string, string> = {
+  "हिंदी": "Apna sawaal pucho... (अपना सवाल पूछें)",
+  "ಕನ್ನಡ": "Nimma prashne keli... (ನಿಮ್ಮ ಪ್ರಶ್ನೆ ಕೇಳಿ)",
+  "বাংলা": "Apnar proshno likhun... (আপনার প্রশ্ন লিখুন)",
+};
+
 // ─── MOCK DATA ───
 const RAVI = {
   name: "Ravi Kumar", nameHindi: "रवि कुमार",
@@ -1384,7 +1398,7 @@ export default function ShramSetuSaathi() {
             borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer",
             color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6,
             opacity: isTranslating ? 0.6 : 1,
-          }}>{isTranslating ? "⏳" : showEnglish ? "हिंदी" : "EN"}</button>
+          }}>{isTranslating ? "⏳" : showEnglish ? (LANG_LABEL[selectedLang] ?? selectedLang) : "EN"}</button>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
@@ -2040,7 +2054,7 @@ export default function ShramSetuSaathi() {
                         : hindiText.slice(0, hindiCharIndex)}
                       {!showEnglish && hindiCharIndex < hindiText.length && <span style={{ opacity: 0.5 }}>▌</span>}
                     </p>
-                    <button onClick={handleToggleEnglish} disabled={isTranslating} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6, opacity: isTranslating ? 0.6 : 1 }}>{isTranslating ? "⏳" : showEnglish ? "हिंदी" : "EN"}</button>
+                    <button onClick={handleToggleEnglish} disabled={isTranslating} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6, opacity: isTranslating ? 0.6 : 1 }}>{isTranslating ? "⏳" : showEnglish ? (LANG_LABEL[selectedLang] ?? selectedLang) : "EN"}</button>
                   </div>
                   <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}><SafetyBadge score={safety} delayed={false} /></div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
@@ -2176,7 +2190,7 @@ export default function ShramSetuSaathi() {
                   ? (isTranslating ? "Translating…" : (englishTranslation || HINDI_RESPONSES.credit.slice(0, hindiCharIndex)))
                   : HINDI_RESPONSES.credit.slice(0, hindiCharIndex)}
               </p>
-              <button onClick={handleToggleEnglish} disabled={isTranslating} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6, opacity: isTranslating ? 0.6 : 1 }}>{isTranslating ? "⏳" : showEnglish ? "हिंदी" : "EN"}</button>
+              <button onClick={handleToggleEnglish} disabled={isTranslating} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6, opacity: isTranslating ? 0.6 : 1 }}>{isTranslating ? "⏳" : showEnglish ? (LANG_LABEL[selectedLang] ?? selectedLang) : "EN"}</button>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
                 <button onClick={() => setAppState("confirmed")} style={{ background: "var(--saffron)", color: "white", border: "none", borderRadius: 10, padding: 12, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>✓ Confirm & Proceed</button>
                 <button onClick={resetToIdle} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 12, fontSize: 14, color: "var(--text-secondary)", cursor: "pointer" }}>← Ask Again</button>
@@ -2224,7 +2238,7 @@ export default function ShramSetuSaathi() {
                 {!showEnglish && hindiCharIndex < HINDI_RESPONSES.safety.length && <span style={{ opacity: 0.5 }}>▌</span>}
               </p>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={handleToggleEnglish} disabled={isTranslating} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", opacity: isTranslating ? 0.6 : 1 }}>{isTranslating ? "⏳" : showEnglish ? "हिंदी" : "EN"}</button>
+                <button onClick={handleToggleEnglish} disabled={isTranslating} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", opacity: isTranslating ? 0.6 : 1 }}>{isTranslating ? "⏳" : showEnglish ? (LANG_LABEL[selectedLang] ?? selectedLang) : "EN"}</button>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12 }}>
                 <Shield size={14} color="var(--emerald)" />
@@ -2311,7 +2325,7 @@ export default function ShramSetuSaathi() {
           value={textInput}
           onChange={e => setTextInput(e.target.value)}
           onKeyDown={e => e.key === "Enter" && submitQuery(textInput)}
-          placeholder="Apna sawaal pucho... (अपना सवाल पूछें)"
+          placeholder={LANG_PLACEHOLDER[selectedLang] ?? "Apna sawaal pucho..."}
           style={{
             flex: 1, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: 12, padding: "12px 16px", fontSize: 14, color: "white", outline: "none",
