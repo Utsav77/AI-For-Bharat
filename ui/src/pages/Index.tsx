@@ -86,6 +86,19 @@ interface ApiResponse {
 // ─── CONSTANTS ───
 const API_URL = "https://ei1hvlz5vg.execute-api.ap-south-1.amazonaws.com/query";
 
+// ─── SARVAM AI ───
+const SARVAM_STT_URL = "https://api.sarvam.ai/speech-to-text";
+const SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech/stream";
+const SARVAM_API_KEY = "sk_5xm1xivc_SAFLKMb679QQFVUJacJgXsNp";
+
+// Best speaker per language for informal worker context (warm female voice)
+const SARVAM_SPEAKER: Record<string, string> = {
+  "हिंदी": "kavya",
+  "ಕನ್ನಡ": "suhani",   // closest warm female for Kannada
+  "தமிழ்": "priya",
+  "বাংলা":  "neha",
+};
+
 const LANG_TO_BCP47: Record<string, string> = {
   "हिंदी": "hi-IN",
   "ಕನ್ನಡ": "kn-IN",
@@ -246,88 +259,177 @@ export default function ShramSetuSaathi() {
   // ── Refs ──
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const sessionIdRef = useRef(`session-${Date.now()}`);
-  const finalTranscriptRef = useRef("");   // persists across recognition callbacks
+  const finalTranscriptRef = useRef("");
   const asrStartRef = useRef<number>(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Ref that always points to the latest callAPI — breaks the circular
+  // useCallback dependency (startRecording is declared before callAPI)
+  const callAPIRef = useRef<((query: string, asrMs?: number) => Promise<void>) | null>(null);
+
+  // Sarvam STT — show "Transcribing..." between stop-tap and backend call
+  const [sarvamSTTStatus, setSarvamSTTStatus] = useState<"idle" | "transcribing" | "done">("idle");
 
   // ─────────────────────────────────────────────
-  //  WEB SPEECH API — start / stop recording
+  //  SARVAM STT — call speech-to-text API
   // ─────────────────────────────────────────────
-  const startRecording = useCallback(() => {
-    // Clear previous errors
+  const callSarvamSTT = useCallback(async (audioBlob: Blob): Promise<string | null> => {
+    setSarvamSTTStatus("transcribing");
+    try {
+      // Derive file extension from blob type ("audio/webm" → "webm", "audio/mp4" → "mp4")
+      const ext = audioBlob.type.split("/")[1] || "webm";
+      const formData = new FormData();
+      formData.append("file", audioBlob, `recording.${ext}`);
+      formData.append("language_code", LANG_TO_BCP47[selectedLang] || "hi-IN");
+      formData.append("model", "saarika:v2.5");
+      formData.append("mode", "transcribe");
+
+      const res = await fetch(SARVAM_STT_URL, {
+        method: "POST",
+        headers: { "api-subscription-key": SARVAM_API_KEY },
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error(`Sarvam STT ${res.status}`);
+      const data = await res.json();
+      const transcript = data.transcript?.trim() ?? "";
+      setSarvamSTTStatus("done");
+      return transcript || null;
+    } catch (err) {
+      console.warn("Sarvam STT failed, trying Web Speech fallback:", err);
+      setSarvamSTTStatus("idle");
+      return null;
+    }
+  }, [selectedLang]);
+
+  // ─────────────────────────────────────────────
+  //  SARVAM TTS — call text-to-speech API
+  // ─────────────────────────────────────────────
+  const callSarvamTTS = useCallback(async (text: string): Promise<HTMLAudioElement | null> => {
+    try {
+      const payload = {
+        text,
+        target_language_code: LANG_TO_BCP47[selectedLang] || "hi-IN",
+        speaker: SARVAM_SPEAKER[selectedLang] || "kavya",
+        model: "bulbul:v3",
+        pace: 1.0,
+        speech_sample_rate: 22050,
+        output_audio_codec: "mp3",
+        enable_preprocessing: true,
+      };
+
+      const res = await fetch(SARVAM_TTS_URL, {
+        method: "POST",
+        headers: {
+          "api-subscription-key": SARVAM_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error(`Sarvam TTS ${res.status}`);
+
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const audio = new Audio(objectUrl);
+      audio.onended = () => {
+        setAudioPlaying(false);
+        URL.revokeObjectURL(objectUrl);   // clean up blob URL after playback
+      };
+      return audio;
+    } catch (err) {
+      console.warn("Sarvam TTS failed:", err);
+      return null;
+    }
+  }, [selectedLang]);
+
+  // ─────────────────────────────────────────────
+  //  MEDIARECORDER — start / stop recording
+  // ─────────────────────────────────────────────
+  const startRecording = useCallback(async () => {
     setSpeechError(null);
     setInterimText("");
-    finalTranscriptRef.current = "";
+    setSarvamSTTStatus("idle");
+    audioChunksRef.current = [];
 
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setSpeechError("Speech recognition not supported. Please use Chrome.");
+    // Request mic permission
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err: any) {
+      const msg = err?.name === "NotAllowedError"
+        ? "Microphone permission denied. Click 🔒 in Chrome's address bar to allow."
+        : "Microphone not available. Please check your device.";
+      setSpeechError(msg);
       setAppState("error");
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = LANG_TO_BCP47[selectedLang] || "hi-IN";
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
+    // Pick best supported mime type.
+    // IMPORTANT: use "audio/webm;codecs=opus" for MediaRecorder quality,
+    // but strip the codec suffix before sending to Sarvam (it rejects it).
+    const recorderMime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : MediaRecorder.isTypeSupported("audio/webm")
+      ? "audio/webm"
+      : "audio/mp4";
+    // Sarvam-safe mime — strip codec suffix e.g. "audio/webm;codecs=opus" → "audio/webm"
+    const sarvamMime = recorderMime.split(";")[0];
 
-    recognition.onstart = () => {
-      asrStartRef.current = Date.now();
-      setAppState("recording");
+    const recorder = new MediaRecorder(stream, { mimeType: recorderMime });
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunksRef.current.push(e.data);
     };
 
-    recognition.onresult = (event: any) => {
-      let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const t = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscriptRef.current += t;
-        } else {
-          interim += t;
-        }
+    recorder.onstop = async () => {
+      // Stop all mic tracks immediately
+      stream.getTracks().forEach(t => t.stop());
+
+      // Re-create blob with Sarvam-safe mime (no codec suffix)
+      const blob = new Blob(audioChunksRef.current, { type: sarvamMime });
+      if (blob.size < 1000) {
+        // Too short — nothing was said
+        setInterimText("");
+        setAppState("idle");
+        setSarvamSTTStatus("idle");
+        return;
       }
-      // Show whichever is non-empty
-      setInterimText(finalTranscriptRef.current || interim);
-    };
 
-    recognition.onend = () => {
-      const query = finalTranscriptRef.current.trim();
-      if (query) {
-        setCurrentQuery(query);
-        setTextInput(query);
-        setInterimText(query);
+      // Show "Transcribing..." UI while Sarvam processes
+      setInterimText("सुन रहा हूँ... / Transcribing...");
+
+      const asrMs = Date.now() - asrStartRef.current;
+      const transcript = await callSarvamSTT(blob);
+
+      if (transcript) {
+        setCurrentQuery(transcript);
+        setTextInput(transcript);
+        setInterimText(transcript);
         setAppState("processing");
-        callAPI(query, Date.now() - asrStartRef.current);
+        callAPIRef.current?.(transcript, asrMs);
       } else {
-        // Nothing heard — go back to idle
+        // Sarvam STT failed — fall back to empty and let user retry
         setInterimText("");
-        setAppState("idle");
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error("SpeechRecognition error:", event.error);
-      if (event.error === "no-speech") {
-        // Silently reset
-        setInterimText("");
-        setAppState("idle");
-      } else if (event.error === "not-allowed") {
-        setSpeechError("Microphone permission denied. Please allow mic access and try again.");
-        setAppState("error");
-      } else {
-        setSpeechError(`Speech error: ${event.error}`);
+        setSpeechError("Could not understand audio. Please speak clearly and try again.");
         setAppState("error");
       }
     };
 
-    recognitionRef.current = recognition;
-    recognition.start();
-  }, [selectedLang]);
+    asrStartRef.current = Date.now();
+    recorder.start();
+    mediaRecorderRef.current = recorder;
+    setAppState("recording");
+  }, [callSarvamSTT, selectedLang]);
 
   const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    }
+    // Legacy Web Speech fallback cleanup
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current = null;
@@ -391,12 +493,43 @@ export default function ShramSetuSaathi() {
       const hindiText = data.explanation?.body?.explanation_hindi ?? null;
       setApiHindiExplanation(hindiText);
 
-      // ── 5. TTS audio URL ──
-      const audioUrl = data.ttsResult?.body?.audioUrl ?? null;
-      if (audioUrl) {
-        setApiAudioUrl(audioUrl);
-        const audio = new Audio(audioUrl);
-        audio.play().catch(() => {});
+      // ── 5. TTS via Sarvam AI — generate audio from Hindi explanation ──
+      // We use Sarvam TTS (not backend Polly) for richer Indian language voices.
+      // callSarvamTTS is called here — still within the user gesture call stack —
+      // so the resulting Audio element is pre-unlocked for autoplay.
+      if (hindiText) {
+        const sarvamAudio = await callSarvamTTS(hindiText);
+        if (sarvamAudio) {
+          audioRef.current = sarvamAudio;
+          setApiAudioUrl("sarvam"); // non-null sentinel so UI shows replay button
+          // Prime: play→pause to unlock for deferred autoplay
+          sarvamAudio.play().then(() => {
+            sarvamAudio.pause();
+            sarvamAudio.currentTime = 0;
+          }).catch(() => {});
+        } else {
+          // Sarvam TTS failed — fall back to backend Polly URL if present
+          const pollyUrl = data.ttsResult?.body?.audioUrl ?? null;
+          if (pollyUrl) {
+            setApiAudioUrl(pollyUrl);
+            const audio = new Audio(pollyUrl);
+            audio.preload = "auto";
+            audio.onended = () => setAudioPlaying(false);
+            audioRef.current = audio;
+            audio.play().then(() => { audio.pause(); audio.currentTime = 0; }).catch(() => {});
+          }
+        }
+      } else {
+        // No explanation text — try backend Polly URL
+        const pollyUrl = data.ttsResult?.body?.audioUrl ?? null;
+        if (pollyUrl) {
+          setApiAudioUrl(pollyUrl);
+          const audio = new Audio(pollyUrl);
+          audio.preload = "auto";
+          audio.onended = () => setAudioPlaying(false);
+          audioRef.current = audio;
+          audio.play().then(() => { audio.pause(); audio.currentTime = 0; }).catch(() => {});
+        }
       }
 
       // ── 6. Internal latencies from response ──
@@ -428,6 +561,9 @@ export default function ShramSetuSaathi() {
       setTimeout(() => setShowLatency(false), 8000);
     }
   }, [selectedLang]);
+
+  // Keep callAPIRef in sync so startRecording (declared before callAPI) can call it
+  callAPIRef.current = callAPI;
 
   // ─────────────────────────────────────────────
   //  TEXT SUBMIT (chips / input bar)
@@ -462,14 +598,43 @@ export default function ShramSetuSaathi() {
         clearInterval(iv);
         setTimeout(() => {
           setAppState("results");
-          setAudioPlaying(true);
           setTimeout(() => setScoreAnimated(true), 100);
           setTimeout(() => setNeedleAnimated(true), 100);
-          setTimeout(() => setAudioPlaying(false), 3000);
         }, 400);
       }
     }, 400);
     return () => clearInterval(iv);
+  }, [appState]);
+
+  // ─────────────────────────────────────────────
+  //  AUTO-PLAY TTS AUDIO when results appear
+  // ─────────────────────────────────────────────
+  useEffect(() => {
+    if (appState !== "results") return;
+
+    const audio = audioRef.current;
+    if (audio) {
+      const triggerPlay = () => {
+        audio.currentTime = 0;
+        setAudioPlaying(true);
+        audio.play().catch(() => {
+          // Autoplay still blocked — waveform animates for estimated duration
+          setTimeout(() => setAudioPlaying(false), 3000);
+        });
+      };
+
+      // If audio is already loaded (HAVE_ENOUGH_DATA = 4), play immediately
+      // Otherwise wait for canplaythrough to fire
+      if (audio.readyState >= 4) {
+        triggerPlay();
+      } else {
+        audio.addEventListener("canplaythrough", triggerPlay, { once: true });
+      }
+    } else {
+      // No audio (API failed / demo mode) — animate waveform for 3s
+      setAudioPlaying(true);
+      setTimeout(() => setAudioPlaying(false), 3000);
+    }
   }, [appState]);
 
   // ─────────────────────────────────────────────
@@ -516,6 +681,18 @@ export default function ShramSetuSaathi() {
 
   const resetToIdle = useCallback(() => {
     stopRecording();
+    // Stop MediaRecorder if still running
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    }
+    // Stop any playing audio immediately
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    setSarvamSTTStatus("idle");
     setAppState("idle");
     setCurrentQuery("");
     setTextInput("");
@@ -790,12 +967,12 @@ export default function ShramSetuSaathi() {
     const safetyScore = apiSafetyScore != null ? apiSafetyScore.toFixed(2) : "0.95";
     const intentLabel = apiIntentType ?? "procurement_search";
     const dynamicLabels = [
-      { label: "ASR",    sub: `Web Speech · ${LANG_TO_BCP47[selectedLang] || "hi-IN"}` },
+      { label: "ASR",    sub: `Sarvam saarika:v2.5 · ${LANG_TO_BCP47[selectedLang] || "hi-IN"}` },
       { label: "Intent", sub: `${intentLabel} · ${confidence}` },
       { label: "ONDC",   sub: `${providerCount} providers · Beckn Protocol` },
       { label: "TOPSIS", sub: `Ranked · ${Object.keys(apiCriteriaWeights ?? {}).length || 4} criteria` },
       { label: "Safety", sub: `Score ${safetyScore} · PROCEED` },
-      { label: "Hindi",  sub: `Claude Sonnet · ${apiHindiExplanation?.length ?? 142} chars` },
+      { label: "TTS",    sub: `Sarvam bulbul:v3 · ${SARVAM_SPEAKER[selectedLang] || "kavya"}` },
     ];
     return (
     <div style={{
@@ -919,12 +1096,22 @@ export default function ShramSetuSaathi() {
           {!audioPlaying && appState === "results" && (
             <button
               onClick={() => {
-                setAudioPlaying(true);
-                if (apiAudioUrl) {
+                if (audioRef.current) {
+                  // Restart from beginning
+                  audioRef.current.currentTime = 0;
+                  setAudioPlaying(true);
+                  audioRef.current.play().catch(() => {
+                    setTimeout(() => setAudioPlaying(false), 3000);
+                  });
+                } else if (apiAudioUrl) {
+                  // Fallback: create new Audio if ref was lost
                   const audio = new Audio(apiAudioUrl);
-                  audio.play().catch(() => {});
                   audio.onended = () => setAudioPlaying(false);
+                  audioRef.current = audio;
+                  setAudioPlaying(true);
+                  audio.play().catch(() => setTimeout(() => setAudioPlaying(false), 3000));
                 } else {
+                  setAudioPlaying(true);
                   setTimeout(() => setAudioPlaying(false), 3000);
                 }
               }}
@@ -1067,12 +1254,20 @@ export default function ShramSetuSaathi() {
       {/* ── RECORDING STATE ── */}
       {appState === "recording" && (
         <>
-          <div style={{ fontSize: 13, color: "var(--red)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--red)", animation: "activePulse 1s ease infinite" }} />
-            सुन रहा हूँ... (Listening)
+          {/* Status line — changes to "Transcribing" while Sarvam processes */}
+          <div style={{ fontSize: 13, marginBottom: 16, display: "flex", alignItems: "center", gap: 6,
+            color: sarvamSTTStatus === "transcribing" ? "var(--amber)" : "var(--red)" }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: sarvamSTTStatus === "transcribing" ? "var(--amber)" : "var(--red)",
+              animation: "activePulse 1s ease infinite",
+            }} />
+            {sarvamSTTStatus === "transcribing"
+              ? "Sarvam AI transcribing... / लिख रहा हूँ..."
+              : "सुन रहा हूँ... (Listening)"}
           </div>
 
-          {/* Live interim transcript */}
+          {/* Transcript box — shows interim text or transcribing indicator */}
           {interimText ? (
             <div style={{
               fontFamily: S.hindi, fontSize: "1.1rem", color: "var(--text-primary)",
@@ -1081,51 +1276,67 @@ export default function ShramSetuSaathi() {
               marginBottom: 16, minHeight: 48, transition: "all 200ms",
             }}>
               {interimText}
-              <span style={{ opacity: 0.5 }}>▌</span>
+              {sarvamSTTStatus !== "transcribing" && <span style={{ opacity: 0.5 }}>▌</span>}
             </div>
           ) : (
-            <div style={{
-              fontSize: 13, color: "var(--text-muted)", marginBottom: 16,
-              fontFamily: S.hindi,
-            }}>बोलना शुरू करें...</div>
+            <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16, fontFamily: S.hindi }}>
+              {sarvamSTTStatus === "transcribing" ? "⏳ Sarvam AI सुन रहा है..." : "बोलना शुरू करें..."}
+            </div>
           )}
 
-          {/* Waveform bars */}
+          {/* Waveform — pulses orange when recording, amber when transcribing */}
           <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 20, height: 44 }}>
             {[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6].map((d, i) => (
               <div key={i} style={{
-                width: 4, background: "var(--saffron)", borderRadius: 2,
+                width: 4, borderRadius: 2,
+                background: sarvamSTTStatus === "transcribing" ? "var(--amber)" : "var(--saffron)",
                 animation: `wave 0.8s ease-in-out infinite ${d}s`, height: 8,
               }} />
             ))}
           </div>
 
-          {/* Stop button — tap to end recording early */}
-          <div style={{ position: "relative", width: 220, height: 220 }}>
-            {[220, 170, 120].map((s, i) => (
-              <div key={i} style={{
-                position: "absolute", width: s, height: s, borderRadius: "50%",
-                border: "2px solid rgba(239,68,68,0.5)", top: (220 - s) / 2, left: (220 - s) / 2,
-                animation: `pulseOut 1.4s ease-out infinite ${i * 0.35}s`,
-                pointerEvents: "none",   // ← fix
-              }} />
-            ))}
-            <button
-              onClick={stopRecording}
-              aria-label="Stop recording"
-              style={{
-                position: "absolute", top: 60, left: 60, width: 100, height: 100, borderRadius: "50%",
-                background: "linear-gradient(145deg, #DC2626, #B91C1C)",
-                border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                boxShadow: "0 0 0 1px rgba(239,68,68,0.4), 0 0 32px rgba(239,68,68,0.25)",
-                zIndex: 1,
-              }}
-            >
-              <MicOff size={32} color="white" />
-            </button>
+          {/* Stop button — hidden while Sarvam is transcribing */}
+          {sarvamSTTStatus !== "transcribing" && (
+            <div style={{ position: "relative", width: 220, height: 220 }}>
+              {[220, 170, 120].map((s, i) => (
+                <div key={i} style={{
+                  position: "absolute", width: s, height: s, borderRadius: "50%",
+                  border: "2px solid rgba(239,68,68,0.5)", top: (220 - s) / 2, left: (220 - s) / 2,
+                  animation: `pulseOut 1.4s ease-out infinite ${i * 0.35}s`,
+                  pointerEvents: "none",
+                }} />
+              ))}
+              <button
+                onClick={stopRecording}
+                aria-label="Stop recording"
+                style={{
+                  position: "absolute", top: 60, left: 60, width: 100, height: 100, borderRadius: "50%",
+                  background: "linear-gradient(145deg, #DC2626, #B91C1C)",
+                  border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                  boxShadow: "0 0 0 1px rgba(239,68,68,0.4), 0 0 32px rgba(239,68,68,0.25)",
+                  zIndex: 1,
+                }}
+              >
+                <MicOff size={32} color="white" />
+              </button>
+            </div>
+          )}
+
+          {/* Sarvam badge */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+            <span style={{
+              fontSize: 11, color: "var(--amber)",
+              background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)",
+              borderRadius: 999, padding: "3px 10px",
+            }}>
+              {sarvamSTTStatus === "transcribing"
+                ? "⚡ Sarvam saarika:v2.5 · Transcribing"
+                : "🎙 Sarvam AI STT · " + (LANG_TO_BCP47[selectedLang] || "hi-IN")}
+            </span>
           </div>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 12 }}>
-            Tap to stop · रोकने के लिए दबाएँ
+
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
+            {sarvamSTTStatus === "transcribing" ? "" : "Tap to stop · रोकने के लिए दबाएँ"}
           </div>
         </>
       )}
