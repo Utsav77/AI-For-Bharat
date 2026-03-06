@@ -226,7 +226,8 @@ export default function ShramSetuSaathi() {
   const [processingStep, setProcessingStep] = useState(0);
   const [showAllOptions, setShowAllOptions] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
-  const [audioReadyToPlay, setAudioReadyToPlay] = useState(false); // triggers autoplay when TTS arrives
+  const [audioReadyToPlay, setAudioReadyToPlay] = useState(false);
+  const [apiDataReady, setApiDataReady] = useState(false); // true once API response parsed
   const [hindiCharIndex, setHindiCharIndex] = useState(0);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [selectedLang, setSelectedLang] = useState("हिंदी");
@@ -269,6 +270,7 @@ export default function ShramSetuSaathi() {
   // Ref that always points to the latest callAPI — breaks the circular
   // useCallback dependency (startRecording is declared before callAPI)
   const callAPIRef = useRef<((query: string, asrMs?: number) => Promise<void>) | null>(null);
+  const apiDataReadyRef = useRef(false); // mirrors apiDataReady for use inside setTimeout closures
 
   // Sarvam STT — show "Transcribing..." between stop-tap and backend call
   const [sarvamSTTStatus, setSarvamSTTStatus] = useState<"idle" | "transcribing" | "done">("idle");
@@ -405,6 +407,9 @@ export default function ShramSetuSaathi() {
         setCurrentQuery(transcript);
         setTextInput(transcript);
         setInterimText(transcript);
+        setApiDataReady(false);
+        apiDataReadyRef.current = false;
+        setAudioReadyToPlay(false);
         setAppState("processing");
         callAPIRef.current?.(transcript, asrMs);
       } else {
@@ -602,9 +607,15 @@ export default function ShramSetuSaathi() {
       setShowLatency(true);
       setTimeout(() => setShowLatency(false), 8000);
 
+      // ── Signal that real API data is loaded — safe to show results now ──
+      apiDataReadyRef.current = true;
+      setApiDataReady(true);
+
     } catch (err) {
-      // Non-fatal — demo data will display, just show simulated latency
+      // API failed — flag as ready so hardcoded fallback data shows
       console.warn("API call failed, falling back to demo data:", err);
+      apiDataReadyRef.current = true;
+      setApiDataReady(true);
       const aiSec  = (1.2 + Math.random() * 0.5).toFixed(1);
       const ttsSec = (0.4 + Math.random() * 0.3).toFixed(1);
       setLatencyData({
@@ -627,6 +638,9 @@ export default function ShramSetuSaathi() {
     setCurrentQuery(q);
     setTextInput(q);
     setInterimText(q);
+    setApiDataReady(false);
+    apiDataReadyRef.current = false;
+    setAudioReadyToPlay(false);
     setTimeout(() => {
       setAppState("processing");
       callAPI(q);
@@ -645,20 +659,46 @@ export default function ShramSetuSaathi() {
     setScoreAnimated(false);
     setNeedleAnimated(false);
     let step = 0;
+    let animationDone = false;
+
+    const showResults = () => {
+      setAppState("results");
+      setTimeout(() => setScoreAnimated(true), 100);
+      setTimeout(() => setNeedleAnimated(true), 100);
+    };
+
     const iv = setInterval(() => {
       step++;
       setProcessingStep(step);
       if (step >= 6) {
         clearInterval(iv);
+        animationDone = true;
+        // Only transition if API data has also arrived
+        if (apiDataReadyRef.current) {
+          setTimeout(showResults, 400);
+        }
+        // Otherwise: the apiDataReady useEffect below will call showResults
+      }
+    }, 400);
+    return () => clearInterval(iv);
+  }, [appState]);
+
+  // When API data arrives after animation has already finished, show results now
+  useEffect(() => {
+    if (!apiDataReady || appState !== "processing") return;
+    // Check that pipeline animation is also done (step 6)
+    // processingStep is updated via state so read it directly
+    setProcessingStep(prev => {
+      if (prev >= 6) {
         setTimeout(() => {
           setAppState("results");
           setTimeout(() => setScoreAnimated(true), 100);
           setTimeout(() => setNeedleAnimated(true), 100);
         }, 400);
       }
-    }, 400);
-    return () => clearInterval(iv);
-  }, [appState]);
+      return prev;
+    });
+  }, [apiDataReady]);
 
   // ─────────────────────────────────────────────
   //  AUTO-PLAY TTS AUDIO when results appear
@@ -748,6 +788,8 @@ export default function ShramSetuSaathi() {
     }
     setSarvamSTTStatus("idle");
     setAudioReadyToPlay(false);
+    setApiDataReady(false);
+    apiDataReadyRef.current = false;
     setAppState("idle");
     setCurrentQuery("");
     setTextInput("");
