@@ -89,8 +89,9 @@ interface ApiResponse {
 const API_URL = "https://ei1hvlz5vg.execute-api.ap-south-1.amazonaws.com/query";
 
 // ─── SARVAM AI ───
-const SARVAM_STT_URL = "https://api.sarvam.ai/speech-to-text";
-const SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech/stream";
+const SARVAM_STT_URL       = "https://api.sarvam.ai/speech-to-text";
+const SARVAM_TTS_URL       = "https://api.sarvam.ai/text-to-speech/stream";
+const SARVAM_TRANSLATE_URL = "https://api.sarvam.ai/translate";
 const SARVAM_API_KEY = "sk_5xm1xivc_SAFLKMb679QQFVUJacJgXsNp";
 
 // Best speaker per language for informal worker context (warm female voice)
@@ -174,12 +175,6 @@ const HINDI_RESPONSES: Record<ActiveTab, string> = {
   safety: "Aapko overtime ke liye double rate milna chahiye jo Factories Act 1948 ke Section 59 mein clearly likha hai. Agar employer nahi de raha toh nearest Labour Commissioner office mein complaint karo.",
 };
 
-const ENGLISH_RESPONSES: Record<ActiveTab, string> = {
-  procurement: "Ekart Logistics is the best option — delivery in 3 days for ₹380 with credit availability. Its 4.5 rating is the highest among all 7 providers.",
-  credit: "NanoFin Microloan offers ₹10,000 at 12.5% p.a., disbursed in 2 hours with no prepayment penalty — the best terms available to you.",
-  safety: "You are entitled to double pay for overtime under Section 59 of the Factories Act 1948. If your employer refuses, file a complaint at the nearest Labour Commissioner office.",
-};
-
 const PROCESSING_LABELS = [
   { label: "ASR", sub: "Web Speech · hi-IN" },
   { label: "Intent", sub: "procurement_search · 94%" },
@@ -250,6 +245,10 @@ export default function ShramSetuSaathi() {
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [selectedLang, setSelectedLang] = useState("हिंदी");
   const [showEnglish, setShowEnglish] = useState(false);
+  const [englishTranslation, setEnglishTranslation] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  // Cache: keyed by source text so switching queries resets it automatically
+  const translationCacheRef = useRef<Record<string, string>>({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [latencyData, setLatencyData] = useState<{ total: string; asr: string; ai: string; tts: string } | null>(null);
   const [showLatency, setShowLatency] = useState(false);
@@ -363,6 +362,45 @@ export default function ShramSetuSaathi() {
     } catch (err) {
       console.warn("Sarvam TTS failed:", err);
       return null;
+    }
+  }, [selectedLang]);
+
+  // ─────────────────────────────────────────────
+  //  SARVAM TRANSLATE — translate explanation to English on demand
+  // ─────────────────────────────────────────────
+  const callSarvamTranslate = useCallback(async (text: string): Promise<string | null> => {
+    // Return from cache if already translated
+    if (translationCacheRef.current[text]) return translationCacheRef.current[text];
+
+    setIsTranslating(true);
+    try {
+      const sourceLang = LANG_TO_BCP47[selectedLang] || "hi-IN";
+      const res = await fetch(SARVAM_TRANSLATE_URL, {
+        method: "POST",
+        headers: {
+          "api-subscription-key": SARVAM_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          input: text,
+          source_language_code: sourceLang,
+          target_language_code: "en-IN",
+          speaker_gender: "Female",
+          mode: "formal",
+          model: "mayura:v1",
+          enable_preprocessing: true,
+        }),
+      });
+      if (!res.ok) throw new Error(`Sarvam Translate ${res.status}`);
+      const data = await res.json();
+      const translated = data.translated_text?.trim() ?? null;
+      if (translated) translationCacheRef.current[text] = translated; // cache it
+      return translated;
+    } catch (err) {
+      console.warn("Sarvam translate failed:", err);
+      return null;
+    } finally {
+      setIsTranslating(false);
     }
   }, [selectedLang]);
 
@@ -649,6 +687,23 @@ export default function ShramSetuSaathi() {
   callAPIRef.current = callAPI;
 
   // ─────────────────────────────────────────────
+  //  EN ↔ हिंदी TOGGLE — translate on first EN click, instant after
+  // ─────────────────────────────────────────────
+  const handleToggleEnglish = useCallback(async () => {
+    const nextShowEnglish = !showEnglish;
+    setShowEnglish(nextShowEnglish);
+
+    if (nextShowEnglish && !englishTranslation && !isTranslating) {
+      // Get the current Hindi explanation text to translate
+      const hindiText = apiHindiExplanation || HINDI_RESPONSES[activeTab];
+      if (hindiText) {
+        const translated = await callSarvamTranslate(hindiText);
+        if (translated) setEnglishTranslation(translated);
+      }
+    }
+  }, [showEnglish, englishTranslation, isTranslating, apiHindiExplanation, activeTab, callSarvamTranslate]);
+
+  // ─────────────────────────────────────────────
   //  TEXT SUBMIT (chips / input bar)
   // ─────────────────────────────────────────────
   const submitQuery = useCallback((q: string) => {
@@ -816,6 +871,8 @@ export default function ShramSetuSaathi() {
     setHindiCharIndex(0);
     setShowAllOptions(false);
     setShowEnglish(false);
+    setEnglishTranslation(null);
+    setIsTranslating(false);
     setSpeechError(null);
     setApiAudioUrl(null);
     // Clear live API data so next query starts fresh
@@ -1182,8 +1239,10 @@ export default function ShramSetuSaathi() {
               fontFamily: S.hindi, fontSize: "0.95rem", lineHeight: 1.9, color: "#F1F5F9",
               marginTop: 10, minHeight: 40,
             }}>
-              {showEnglish ? displayText : displayText}
-              {hindiCharIndex < liveHindi.length && <span style={{ opacity: 0.5 }}>▌</span>}
+              {showEnglish
+                ? (isTranslating ? "Translating…" : (englishTranslation || displayText))
+                : displayText}
+              {!showEnglish && hindiCharIndex < liveHindi.length && <span style={{ opacity: 0.5 }}>▌</span>}
             </p>
             {interimText && (
               <div style={{
@@ -1308,7 +1367,9 @@ export default function ShramSetuSaathi() {
             fontFamily: S.hindi, fontSize: "0.95rem", lineHeight: 1.9, color: "#F1F5F9",
             marginTop: 10, minHeight: 40,
           }}>
-            {showEnglish ? ENGLISH_RESPONSES[activeTab] : displayText}
+            {showEnglish
+              ? (isTranslating ? "Translating…" : (englishTranslation || displayText))
+              : displayText}
             {!showEnglish && hindiCharIndex < liveHindi.length && <span style={{ opacity: 0.5 }}>▌</span>}
           </p>
           {/* Show actual query spoken */}
@@ -1321,11 +1382,12 @@ export default function ShramSetuSaathi() {
               🎙 "{interimText}"
             </div>
           )}
-          <button onClick={() => setShowEnglish(!showEnglish)} style={{
+          <button onClick={handleToggleEnglish} disabled={isTranslating} style={{
             background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: "pointer",
+            borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer",
             color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6,
-          }}>{showEnglish ? "हिंदी" : "EN"}</button>
+            opacity: isTranslating ? 0.6 : 1,
+          }}>{isTranslating ? "⏳" : showEnglish ? "हिंदी" : "EN"}</button>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
@@ -1976,10 +2038,12 @@ export default function ShramSetuSaathi() {
                   <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12, marginTop: 12 }}>
                     <AudioWaveform playing={audioPlaying} />
                     <p style={{ fontFamily: S.hindi, fontSize: "0.95rem", lineHeight: 1.9, color: "#F1F5F9", marginTop: 8 }}>
-                      {showEnglish ? ENGLISH_RESPONSES.procurement : hindiText.slice(0, hindiCharIndex)}
+                      {showEnglish
+                        ? (isTranslating ? "Translating…" : (englishTranslation || hindiText.slice(0, hindiCharIndex)))
+                        : hindiText.slice(0, hindiCharIndex)}
                       {!showEnglish && hindiCharIndex < hindiText.length && <span style={{ opacity: 0.5 }}>▌</span>}
                     </p>
-                    <button onClick={() => setShowEnglish(!showEnglish)} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6 }}>{showEnglish ? "हिंदी" : "EN"}</button>
+                    <button onClick={handleToggleEnglish} disabled={isTranslating} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6, opacity: isTranslating ? 0.6 : 1 }}>{isTranslating ? "⏳" : showEnglish ? "हिंदी" : "EN"}</button>
                   </div>
                   <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}><SafetyBadge score={safety} delayed={false} /></div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
@@ -2111,9 +2175,11 @@ export default function ShramSetuSaathi() {
                 ))}
               </div>
               <p style={{ fontFamily: S.hindi, fontSize: "0.95rem", lineHeight: 1.9, color: "#F1F5F9", marginTop: 12 }}>
-                {showEnglish ? ENGLISH_RESPONSES.credit : HINDI_RESPONSES.credit.slice(0, hindiCharIndex)}
+                {showEnglish
+                  ? (isTranslating ? "Translating…" : (englishTranslation || HINDI_RESPONSES.credit.slice(0, hindiCharIndex)))
+                  : HINDI_RESPONSES.credit.slice(0, hindiCharIndex)}
               </p>
-              <button onClick={() => setShowEnglish(!showEnglish)} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6 }}>{showEnglish ? "हिंदी" : "EN"}</button>
+              <button onClick={handleToggleEnglish} disabled={isTranslating} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", marginTop: 6, opacity: isTranslating ? 0.6 : 1 }}>{isTranslating ? "⏳" : showEnglish ? "हिंदी" : "EN"}</button>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 16 }}>
                 <button onClick={() => setAppState("confirmed")} style={{ background: "var(--saffron)", color: "white", border: "none", borderRadius: 10, padding: 12, fontWeight: 600, fontSize: 14, cursor: "pointer" }}>✓ Confirm & Proceed</button>
                 <button onClick={resetToIdle} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: 12, fontSize: 14, color: "var(--text-secondary)", cursor: "pointer" }}>← Ask Again</button>
@@ -2155,11 +2221,13 @@ export default function ShramSetuSaathi() {
                 </div>
               </div>
               <p style={{ fontFamily: S.hindi, fontSize: "0.95rem", lineHeight: 1.9, color: "#F1F5F9" }}>
-                {showEnglish ? ENGLISH_RESPONSES.safety : HINDI_RESPONSES.safety.slice(0, hindiCharIndex)}
+                {showEnglish
+                  ? (isTranslating ? "Translating…" : (englishTranslation || HINDI_RESPONSES.safety.slice(0, hindiCharIndex)))
+                  : HINDI_RESPONSES.safety.slice(0, hindiCharIndex)}
                 {!showEnglish && hindiCharIndex < HINDI_RESPONSES.safety.length && <span style={{ opacity: 0.5 }}>▌</span>}
               </p>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={() => setShowEnglish(!showEnglish)} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)" }}>{showEnglish ? "हिंदी" : "EN"}</button>
+                <button onClick={handleToggleEnglish} disabled={isTranslating} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 999, padding: "3px 10px", fontSize: 11, cursor: isTranslating ? "wait" : "pointer", color: showEnglish ? "var(--saffron)" : "var(--text-secondary)", opacity: isTranslating ? 0.6 : 1 }}>{isTranslating ? "⏳" : showEnglish ? "हिंदी" : "EN"}</button>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12 }}>
                 <Shield size={14} color="var(--emerald)" />
