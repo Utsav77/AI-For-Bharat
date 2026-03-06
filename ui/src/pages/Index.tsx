@@ -97,22 +97,19 @@ const SARVAM_API_KEY = "sk_5xm1xivc_SAFLKMb679QQFVUJacJgXsNp";
 // Best speaker per language for informal worker context (warm female voice)
 const SARVAM_SPEAKER: Record<string, string> = {
   "हिंदी": "kavya",
-  "ಕನ್ನಡ": "suhani",   // closest warm female for Kannada
-  "தமிழ்": "priya",
+  "ಕನ್ನಡ": "suhani",
   "বাংলা":  "neha",
 };
 
 const LANG_TO_BCP47: Record<string, string> = {
   "हिंदी": "hi-IN",
   "ಕನ್ನಡ": "kn-IN",
-  "தமிழ்": "ta-IN",
   "বাংলা": "bn-IN",
 };
 
 const LANG_TO_CODE: Record<string, string> = {
   "हिंदी": "hi",
   "ಕನ್ನಡ": "kn",
-  "தமிழ்": "ta",
   "বাংলা": "bn",
 };
 
@@ -1641,7 +1638,7 @@ export default function ShramSetuSaathi() {
     }}>
       {/* Language pills */}
       <div style={{ display: "flex", gap: 6, marginBottom: 32 }}>
-        {["हिंदी", "ಕನ್ನಡ", "தமிழ்"].map(l => (
+        {["हिंदी", "ಕನ್ನಡ", "বাংলা"].map(l => (
           <button key={l} onClick={() => setSelectedLang(l)} style={{
             background: selectedLang === l ? "var(--saffron)" : "transparent",
             color: selectedLang === l ? "white" : "var(--text-secondary)",
@@ -2297,7 +2294,7 @@ export default function ShramSetuSaathi() {
           </button>
           {showLangDropdown && (
             <div style={{ position: "absolute", bottom: 48, left: 0, ...S.glass, minWidth: 160, padding: 4, zIndex: 60 }}>
-              {["हिंदी", "ಕನ್ನಡ", "தமிழ்", "বাংলা"].map(l => (
+              {["हिंदी", "ಕನ್ನಡ", "বাংলা"].map(l => (
                 <button key={l} onClick={() => { setSelectedLang(l); setShowLangDropdown(false); }} style={{
                   display: "block", width: "100%", textAlign: "left",
                   background: selectedLang === l ? "rgba(249,115,22,0.1)" : "transparent",
