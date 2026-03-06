@@ -107,6 +107,13 @@ const LANG_TO_BCP47: Record<string, string> = {
   "বাংলা": "bn-IN",
 };
 
+// Reverse map — Sarvam detected language_code → our UI lang
+const BCP47_TO_LANG: Record<string, string> = {
+  "hi-IN": "हिंदी", "hi": "हिंदी",
+  "kn-IN": "ಕನ್ನಡ", "kn": "ಕನ್ನಡ",
+  "bn-IN": "বাংলা", "bn": "বাংলা",
+};
+
 const LANG_TO_CODE: Record<string, string> = {
   "हिंदी": "hi",
   "ಕನ್ನಡ": "kn",
@@ -309,11 +316,11 @@ export default function ShramSetuSaathi() {
   const callSarvamSTT = useCallback(async (audioBlob: Blob): Promise<string | null> => {
     setSarvamSTTStatus("transcribing");
     try {
-      // Derive file extension from blob type ("audio/webm" → "webm", "audio/mp4" → "mp4")
       const ext = audioBlob.type.split("/")[1] || "webm";
       const formData = new FormData();
       formData.append("file", audioBlob, `recording.${ext}`);
-      formData.append("language_code", LANG_TO_BCP47[selectedLang] || "hi-IN");
+      // Send "unknown" so Sarvam auto-detects the language
+      formData.append("language_code", "unknown");
       formData.append("model", "saarika:v2.5");
       formData.append("mode", "transcribe");
 
@@ -326,10 +333,21 @@ export default function ShramSetuSaathi() {
       if (!res.ok) throw new Error(`Sarvam STT ${res.status}`);
       const data = await res.json();
       const transcript = data.transcript?.trim() ?? "";
+
+      // Auto-select language pill based on what Sarvam detected
+      const detectedCode = data.language_code as string | undefined;
+      if (detectedCode) {
+        const detectedLang = BCP47_TO_LANG[detectedCode] ?? BCP47_TO_LANG[detectedCode.split("-")[0]];
+        if (detectedLang && detectedLang !== selectedLang) {
+          setSelectedLang(detectedLang);
+          console.info(`Language auto-detected: ${detectedCode} → ${detectedLang}`);
+        }
+      }
+
       setSarvamSTTStatus("done");
       return transcript || null;
     } catch (err) {
-      console.warn("Sarvam STT failed, trying Web Speech fallback:", err);
+      console.warn("Sarvam STT failed:", err);
       setSarvamSTTStatus("idle");
       return null;
     }
