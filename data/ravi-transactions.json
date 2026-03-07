@@ -1,0 +1,82 @@
+{
+  "shramsetu-transaction-log": [
+    {
+      "PutRequest": {
+        "Item": {
+          "workerId": {"S": "RAVI_001"},
+          "timestamp": {"S": "2025-07-01T00:00:00Z"},
+          "month_total_inr": {"N": "18500"},
+          "transaction_count": {"N": "42"},
+          "avg_daily_inr": {"N": "617"},
+          "month": {"S": "2025-07"},
+          "status": {"S": "completed"}
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "workerId": {"S": "RAVI_001"},
+          "timestamp": {"S": "2025-08-01T00:00:00Z"},
+          "month_total_inr": {"N": "21000"},
+          "transaction_count": {"N": "48"},
+          "avg_daily_inr": {"N": "700"},
+          "month": {"S": "2025-08"},
+          "status": {"S": "completed"}
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "workerId": {"S": "RAVI_001"},
+          "timestamp": {"S": "2025-09-01T00:00:00Z"},
+          "month_total_inr": {"N": "19200"},
+          "transaction_count": {"N": "44"},
+          "avg_daily_inr": {"N": "640"},
+          "month": {"S": "2025-09"},
+          "status": {"S": "completed"}
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "workerId": {"S": "RAVI_001"},
+          "timestamp": {"S": "2025-10-01T00:00:00Z"},
+          "month_total_inr": {"N": "22100"},
+          "transaction_count": {"N": "50"},
+          "avg_daily_inr": {"N": "737"},
+          "month": {"S": "2025-10"},
+          "status": {"S": "completed"}
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "workerId": {"S": "RAVI_001"},
+          "timestamp": {"S": "2025-11-01T00:00:00Z"},
+          "month_total_inr": {"N": "20800"},
+          "transaction_count": {"N": "46"},
+          "avg_daily_inr": {"N": "693"},
+          "month": {"S": "2025-11"},
+          "status": {"S": "completed"}
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "workerId": {"S": "RAVI_001"},
+          "timestamp": {"S": "2025-12-01T00:00:00Z"},
+          "month_total_inr": {"N": "18400"},
+          "transaction_count": {"N": "41"},
+          "avg_daily_inr": {"N": "613"},
+          "month": {"S": "2025-12"},
+          "status": {"S": "completed"}
+        }
+      }
+    }
+  ]
+}

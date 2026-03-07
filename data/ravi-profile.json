@@ -1,0 +1,14 @@
+{
+  "workerId": {"S": "RAVI_001"},
+  "name": {"S": "Ravi Kumar"},
+  "language": {"S": "hi"},
+  "location": {"S": "HSR Layout, Bangalore"},
+  "pincode": {"S": "560102"},
+  "business_type": {"S": "street_vendor"},
+  "ondc_registration_months": {"N": "6"},
+  "avg_monthly_transactions_inr": {"N": "20000"},
+  "credit_band": {"S": "MEDIUM"},
+  "monthly_transaction_count": {"N": "45"},
+  "transaction_consistency_stddev": {"N": "3200"},
+  "credential_count": {"N": "3"}
+}
