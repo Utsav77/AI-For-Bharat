@@ -1,0 +1,6 @@
+[
+  { "lenderId": "OCEN-L1", "name": "NanoFin Microloan", "interest_rate": 12.5, "tenure_flexibility": 0.9, "prepayment_penalty": 0, "max_amount": 10000, "disbursement_time_hrs": 2 },
+  { "lenderId": "OCEN-L2", "name": "StreetCredit Finance", "interest_rate": 15.0, "tenure_flexibility": 0.7, "prepayment_penalty": 2.5, "max_amount": 25000, "disbursement_time_hrs": 4 },
+  { "lenderId": "OCEN-L3", "name": "Jan Dhan Micro", "interest_rate": 10.0, "tenure_flexibility": 0.5, "prepayment_penalty": 5.0, "max_amount": 5000, "disbursement_time_hrs": 1 },
+  { "lenderId": "OCEN-L4", "name": "ONDC Credit Co-op", "interest_rate": 11.0, "tenure_flexibility": 0.85, "prepayment_penalty": 1.0, "max_amount": 15000, "disbursement_time_hrs": 3 }
+]
