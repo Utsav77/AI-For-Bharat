@@ -152,16 +152,16 @@ const RAVI = {
 // whatsapp: E.164 without '+' for wa.me links
 // phone: E.164 without '+' for tel: links
 const PROVIDER_CONTACTS: Record<string, { whatsapp: string; phone: string }> = {
-  "XpressBees":        { whatsapp: "918069275000", phone: "918069275000" },
-  "Delhivery":         { whatsapp: "918069650100", phone: "918069650100" },
-  "Delhivery Express": { whatsapp: "918069650100", phone: "918069650100" },
-  "Ekart Logistics":   { whatsapp: "918067272700", phone: "918067272700" },
-  "DTDC":              { whatsapp: "919004022000", phone: "919004022000" },
-  "DTDC Premium":      { whatsapp: "919004022000", phone: "919004022000" },
-  "Blue Dart":         { whatsapp: "911860042333",  phone: "911860042333" },
-  "Shadowfax":         { whatsapp: "918068575050", phone: "918068575050" },
-  "Namma Cargo Co-op": { whatsapp: "918026543210", phone: "918026543210" },
-  "ONDC Credit Co-op": { whatsapp: "918022334455", phone: "918022334455" },
+  "XpressBees":        { whatsapp: "+919242758688", phone: "+9102049116100"},
+  "Delhivery":         { whatsapp: "+919242758688", phone: "+9102049116100" },
+  "Delhivery Express": { whatsapp: "+919242758688", phone: "+9102049116100" },
+  "Ekart Logistics":   { whatsapp: "+919242758688", phone: "+9102049116100" },
+  "DTDC":              { whatsapp: "+919242758688", phone: "+9102049116100" },
+  "DTDC Premium":      { whatsapp: "+919242758688", phone: "+9102049116100" },
+  "Blue Dart":         { whatsapp: "+919242758688", phone: "+9102049116100" },
+  "Shadowfax":         { whatsapp: "+919242758688", phone: "+9102049116100" },
+  "Namma Cargo Co-op": { whatsapp: "+919242758688", phone: "+9102049116100" },
+  "ONDC Credit Co-op": { whatsapp: "+919242758688", phone: "+9102049116100" },
 };
 
 const ONDC = [
