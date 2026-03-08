@@ -1,415 +1,360 @@
-# ☸ ShramSetu Saathi — श्रमसेतु साथी
+# ShramSetu Saathi — श्रमसेतु साथी
 
-> **Voice-first agentic AI assistant for India's 490 million informal workers**
+> **Voice-first agentic AI for India's 490 million informal workers**  
+> Built for the AWS AI for Bharat Hackathon 2026
 
-[![AWS](https://img.shields.io/badge/AWS-ap--south--1-FF9900?logo=amazonaws&logoColor=white)](https://aws.amazon.com/)
-[![Bedrock](https://img.shields.io/badge/Amazon-Bedrock-FF9900?logo=amazonaws)](https://aws.amazon.com/bedrock/)
-[![ONDC](https://img.shields.io/badge/DPI-ONDC-138808)](https://ondc.org/)
-[![OCEN](https://img.shields.io/badge/DPI-OCEN_4.0-FF9933)](https://ocen.dev/)
-[![Bhashini](https://img.shields.io/badge/DPI-Bhashini-000080)](https://bhashini.gov.in/)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-
----
-
-## 🇮🇳 The Problem
-
-India has **490 million informal workers** — street vendors, artisans, daily wage earners, gig workers. **45% are functionally illiterate.** Every digital commerce interface, every credit app, every legal resource assumes the user can read.
-
-**Ravi Kumar** is a street vendor in HSR Layout, Bangalore. He's at his stall at 4 AM. He cannot read a bar chart. But he knows how to hold the WhatsApp voice note button.
-
-ShramSetu Saathi removes the literacy assumption entirely. Ravi speaks a problem in Hindi and hears a solution in under 5 seconds.
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-CloudFront-FF9900?style=for-the-badge&logo=amazonaws)](https://ds0hix0ovs1t0.cloudfront.net/)
+[![Demo Video](https://img.shields.io/badge/Demo%20Video-YouTube-CC0000?style=for-the-badge&logo=youtube)](https://youtube.com/shorts/zc_-zXduHIU?si=c-7HZji1p6oJtWW6)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![AWS](https://img.shields.io/badge/AWS-ap--south--1-FF9900?style=for-the-badge&logo=amazonaws)](https://aws.amazon.com)
 
 ---
 
-## 🎯 What It Does
+## The Problem
 
-ShramSetu Saathi connects informal workers to India's Digital Public Infrastructure via a voice-first pipeline:
+India's informal workforce — street vendors, daily-wage workers, migrant labourers — has no financial advisor, no logistics agent, no legal help.
 
-| Query Type | DPI Connected | What Ravi Gets |
-|---|---|---|
-| 🛒 **Procurement** | ONDC via Beckn Protocol | Best logistics provider, TOPSIS-ranked |
-| 💳 **Credit** | OCEN 4.0 lenders | Best microloan offer with flow-based scoring |
-| ⚖️ **Labour Rights** | RAG over legal corpus | Rights explained in Hindi with legal citations |
+- **490M workers** with no access to government services
+- **₹500B+** lost annually to predatory lending and poor procurement decisions
+- **Zero** voice-native tools in their language that understand their context
 
-**Demo queries:**
-- *"Mujhe logistics chahiye, HSR Layout se Dilli bhejni hai"* → Ekart Logistics, ₹380, 3 days
-- *"Mujhe business ke liye 10,000 rupaye chahiye"* → NanoFin Microloan, 12.5% p.a., 2hr disburse
-- *"Overtime ke paise nahi mile, kya karna chahiye?"* → Factories Act 1948, Section 59 rights
+## The Solution
 
----
+ShramSetu Saathi is a **voice-first, multilingual AI agent**. A worker speaks a question in Hindi, Kannada, or Bengali and hears a ranked, explainable answer back in their own language — in under 2.1 seconds.
 
-## 🏗️ Architecture
+No app download. No literacy required. Just speak.
 
 ```
-User Voice (Hindi)
-       │
-       ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                     AWS API Gateway                              │
-│              (POST /query · ap-south-1)                          │
-└──────────────────────────┬───────────────────────────────────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                   AWS Step Functions                             │
-│                  (Agentic Pipeline)                              │
-│                                                                  │
-│  Step 1 ──► ASR          Amazon Transcribe (hi-IN)  ~0.8s       │
-│  Step 2 ──► Intent       Claude 3.5 Haiku           ~200ms      │
-│  Step 3 ──► Agent        ONDC / OCEN / RAG          ~1.5s       │
-│  Step 4 ──► TOPSIS       Pure math ranking          ~50ms       │
-│  Step 5 ──► Safety       CeRAI validation           ~100ms      │
-│  Step 6 ──► Explain      Claude 3.5 Sonnet + Polly  ~1.6s       │
-│                                                      ─────       │
-│                                          Total:      <5s         │
-└──────────────────────────────────────────────────────────────────┘
-                           │
-                           ▼
-               Hindi audio response (Polly · Kajal neural)
-               Pre-signed S3 URL · 1hr lifecycle
+Worker speaks → Sarvam AI STT → Llama 3 8B (Bedrock) → TOPSIS Ranking
+→ CeRAI Safety Validation → Sarvam AI TTS → Worker hears the answer
 ```
 
 ---
 
-## 🔊 Voice Pipeline
+## Live Flows
 
-### Primary: Web Speech API (Chrome)
-The frontend uses `webkitSpeechRecognition` — no round-trip to a backend for ASR.
+| Flow | Language | What it does |
+|------|----------|--------------|
+| **Procurement** | हिंदी / ಕನ್ನಡ | Finds and ranks ONDC logistics providers via Beckn Protocol |
+| **Credit** | हिंदी | Ranks OCEN micro-lenders by flexibility, penalty, and rate |
+| **Labour Law** | বাংলা | Answers legal queries grounded in the Labour Law database |
+| **General** | Any | Conversational AI for any informal worker question |
+
+---
+
+## Architecture
 
 ```
-Tap mic → Web Speech API (hi-IN) → Live interim transcript → POST to API Gateway
-```
-
-### Backend TTS: Amazon Polly
-- Voice: **Kajal** (neural engine, hi-IN)
-- Response delivered as MP3 via pre-signed S3 URL
-
-### Bhashini Switchback (zero code change)
-When Bhashini registration is approved, switch with one env var:
-```bash
-aws lambda update-function-configuration \
-  --function-name shramsetu-voice-transcribe \
-  --environment 'Variables={VOICE_PROVIDER=bhashini,BHASHINI_API_KEY=your_key}'
+┌──────────────────────────────────────────────────────┐
+│  CLIENT                                              │
+│  React + TypeScript  ←→  CloudFront  ←→  S3 (ui/)   │
+└────────────────────────┬─────────────────────────────┘
+                         │ HTTPS
+┌────────────────────────▼─────────────────────────────┐
+│  AWS CLOUD  (ap-south-1)                             │
+│                                                      │
+│  API Gateway v2                                      │
+│       │                                              │
+│  Step Functions (Express)                            │
+│       │                                              │
+│  lambdas/                                            │
+│  ├── intent-classifier   ├── topsis-ranker           │
+│  ├── ondc-agent          ├── safety-validator        │
+│  ├── ocen-agent          ├── explanation-generator   │
+│  ├── labour-law-agent    ├── tts-polly (fallback)    │
+│  └── session-manager                                 │
+│                                                      │
+│  Amazon Bedrock (Llama 3 8B Instruct)                │
+│  DynamoDB  │  S3  │  CloudWatch  │  IAM              │
+└────────────────────────┬─────────────────────────────┘
+                         │
+┌────────────────────────▼─────────────────────────────┐
+│  EXTERNAL APIs                                       │
+│  Sarvam AI — STT (saarika:v2.5) · TTS (bulbul:v3)   │
+│  ONDC / Beckn  │  OCEN  │  CeRAI Engine              │
+└──────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📊 TOPSIS Ranking Algorithm
+## Tech Stack
 
-Results are ranked using **TOPSIS** (Technique for Order of Preference by Similarity to Ideal Solution) — pure math, no LLM guessing.
+### AI & Intelligence
 
-### Procurement Weights
-| Criterion | Weight |
-|---|---|
-| Price | 35% |
-| Delivery time | 25% |
-| Provider rating | 25% |
-| Credit availability | 15% |
+| Component | Technology |
+|-----------|------------|
+| LLM | Llama 3 8B Instruct via Amazon Bedrock |
+| Ranking | TOPSIS Algorithm (custom TypeScript) |
+| Safety | CeRAI Validator — predatory lending detection |
 
-### Credit Weights
-| Criterion | Weight |
-|---|---|
-| Interest rate | 35% |
-| Disbursement time | 25% |
-| Repayment flexibility | 25% |
-| Prepayment penalty | 15% |
+### Voice & Language — Sarvam AI
 
-**Sample output:**
+| Component | Model | Detail |
+|-----------|-------|--------|
+| Speech-to-Text | `saarika:v2.5` | 11 Indic languages, auto-detect |
+| Text-to-Speech | `bulbul:v3` | Streaming MP3 |
+| Translation | `mayura:v1` | Indic ↔ English |
+| Hindi speaker | `kavya` | |
+| Kannada speaker | `suhani` | |
+| Bengali speaker | `neha` | |
 
-| Rank | Provider | Price | Days | Rating | Credit | TOPSIS |
-|---|---|---|---|---|---|---|
-| 🥇 1 | Ekart Logistics | ₹380 | 3 | 4.5★ | ✓ | 84.7% |
-| 2 | ONDC Credit Co-op | ₹320 | 3 | 3.5★ | ✓ | 71.2% |
-| 3 | Namma Cargo Co-op | ₹320 | 3 | 3.5★ | ✓ | 68.4% |
+### AWS Services
 
----
+| Service | Role |
+|---------|------|
+| Lambda ×9 | All business logic, Node.js 20 |
+| Step Functions | Express workflow orchestration |
+| API Gateway v2 | HTTP API endpoint |
+| Amazon Bedrock | Llama 3 8B inference |
+| DynamoDB | Session state, on-demand pricing |
+| S3 | Audio files, frontend build |
+| CloudFront | CDN, global edge delivery |
+| CloudWatch | 6 custom metrics |
+| IAM | Least-privilege roles per Lambda |
 
-## 🧠 AI Layer
-
-| Model | Role | Latency |
-|---|---|---|
-| **Claude 3.5 Haiku** (Bedrock) | Intent classification → `procurement_search \| credit_request \| safety_query` | ~200ms |
-| **Claude 3.5 Sonnet** (Bedrock) | Hindi explanation generation (2 sentences, ~150 chars) | ~1.2s |
-
-### Flow-Based Credit Scoring
-No CIBIL score needed. Credit assessment uses Ravi's ONDC transaction history:
-- 6 months of transaction data
-- Average monthly revenue
-- Transaction volume consistency
-- Digital credential count
-
----
-
-## 🛡️ Safety & Compliance
-
-Every response passes through **CeRAI (Centre for Responsible AI) Legal Framework** validation:
-
-| Score | Action |
-|---|---|
-| ≥ 0.8 | `PROCEED` — response delivered |
-| < 0.8 | `HUMAN_REVIEW` — escalated, not auto-delivered |
-
-Current scores: Procurement 0.95 · Credit 0.92 · Labour Law 0.91
-
----
-
-## 🗂️ Tech Stack
+### Frontend
 
 ```
-Frontend          React + TypeScript (Vite)
-                  Web Speech API (Chrome, hi-IN)
-                  Recharts (TOPSIS visualization)
-                  Tailwind CSS
-
-Backend           AWS Lambda (Node.js 20)
-Orchestration     AWS Step Functions (Express Workflow)
-API               AWS API Gateway (HTTP)
-AI                Amazon Bedrock (Claude 3.5 Haiku + Sonnet)
-ASR               Amazon Transcribe (hi-IN fallback)
-TTS               Amazon Polly (Kajal, neural)
-Voice (planned)   Bhashini (government AI language platform)
-Storage           DynamoDB · S3 · OpenSearch Serverless
-Region            AWS ap-south-1 (Indian data residency)
+React 18 + TypeScript · Tailwind CSS · Vite + esbuild
+Web Audio API (waveform visualizer)
 ```
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
-shramsetu-saathi/
-├── src/
-│   ├── pages/
-│   │   └── Index.tsx          # Main UI — Voice + Dashboard modes
-│   └── ...
-├── lambda/
-│   ├── intent-classifier/     # Claude Haiku — routes query type
-│   ├── procurement-agent/     # ONDC Beckn Protocol integration
-│   ├── credit-agent/          # OCEN 4.0 lender fetch + scoring
-│   ├── safety-agent/          # RAG over labour law corpus
-│   ├── topsis-ranker/         # Pure math ranking Lambda
-│   ├── safety-validator/      # CeRAI framework scoring
-│   ├── explain-generator/     # Claude Sonnet Hindi explanation
-│   ├── voice-transcribe/      # Amazon Transcribe ASR
-│   └── voice-synthesize/      # Amazon Polly TTS
-├── statemachine/
-│   └── pipeline.asl.json      # Step Functions state machine definition
-├── infra/
-│   ├── iam-roles.json         # Required IAM policies
-│   └── s3-lifecycle.json      # Privacy-first S3 lifecycle rules
-└── docs/
-    ├── ShramSetu_Bhashini_UseCase.docx
-    └── ShramSetu_Transcribe_Polly_Guide.docx
+AI-For-Bharat/
+├── ui/                        # React + TypeScript frontend
+│   └── Index.tsx              # Main app — voice UI, all flows
+├── lambdas/                   # AWS Lambda functions (Node.js 20)
+│   ├── intent-classifier/     # Llama 3 intent routing
+│   ├── ondc-agent/            # Beckn Protocol logistics lookup
+│   ├── ocen-agent/            # OCEN micro-lender lookup
+│   ├── topsis-ranker/         # Deterministic TOPSIS scoring
+│   ├── safety-validator/      # CeRAI predatory content check
+│   ├── explanation-generator/ # Indic explanation via Llama 3
+│   ├── labour-law-agent/      # Legal query handler
+│   ├── tts-polly/             # Amazon Polly fallback TTS
+│   └── session-manager/       # DynamoDB session state
+├── data/                      # Static data — providers, lenders, legal corpus
+├── infra/                     # IAM roles, S3 lifecycle, Step Functions ASL
+├── scripts/                   # Deploy and utility scripts
+├── Index.tsx                  # Root entry (symlinked to ui/)
+├── package.json
+├── tsconfig.json
+└── README.md
 ```
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
-- Node.js 18+
-- AWS CLI configured for `ap-south-1`
-- AWS account with Bedrock model access (Claude 3.5 Haiku + Sonnet)
 
-### Frontend Setup
+- Node.js 20+
+- AWS CLI v2 configured for `ap-south-1`
+- Sarvam AI API key — get one at [sarvam.ai](https://sarvam.ai)
+- Amazon Bedrock access enabled for `meta.llama3-8b-instruct-v1` in `ap-south-1`
+
+### Environment Variables
 
 ```bash
-git clone https://github.com/your-org/shramsetu-saathi
-cd shramsetu-saathi
+# .env.local
+VITE_API_ENDPOINT=https://ei1hvlz5vg.execute-api.ap-south-1.amazonaws.com/query
+VITE_SARVAM_API_KEY=your_sarvam_key_here
+```
+
+### Install & Run
+
+```bash
+git clone https://github.com/Utsav77/AI-For-Bharat.git
+cd AI-For-Bharat
 npm install
 npm run dev
 ```
 
-The API endpoint is pre-configured in `src/pages/Index.tsx`:
-```typescript
-const API_URL = "https://ei1hvlz5vg.execute-api.ap-south-1.amazonaws.com/query";
-```
-
-### Backend — Quick Lambda Deploy
+### Deploy Frontend
 
 ```bash
-# 1. Install Lambda dependencies
-cd lambda/voice-synthesize && npm install
-cd lambda/voice-transcribe && npm install
+npm run build
+aws s3 sync dist/ s3://your-bucket-name --delete
+aws cloudfront create-invalidation --distribution-id YOUR_ID --paths "/*"
+```
 
-# 2. Test Polly voice immediately (5-min validation)
-aws polly synthesize-speech \
-  --voice-id Kajal \
-  --engine neural \
-  --language-code hi-IN \
-  --text "Ravi bhai, Ekart Logistics sabse achha option hai." \
-  /tmp/test.mp3
-open /tmp/test.mp3
+### Deploy a Lambda
 
-# 3. Deploy Lambdas (repeat for each)
-cd lambda/voice-synthesize
+```bash
+cd lambdas/intent-classifier
+npm install
 zip -r function.zip .
-aws lambda create-function \
-  --function-name shramsetu-voice-synthesize \
-  --runtime nodejs20.x \
-  --handler index.handler \
+aws lambda update-function-code \
+  --function-name shramsetu-intent-classifier \
   --zip-file fileb://function.zip \
-  --role arn:aws:iam::YOUR_ACCOUNT:role/shramsetu-lambda-role \
   --region ap-south-1
 ```
 
-### Demo Mode (no backend required)
-
-POST directly to the API with a `demoMode` payload:
+### Test the API directly
 
 ```bash
-# Procurement demo
+# Procurement query
 curl -X POST https://ei1hvlz5vg.execute-api.ap-south-1.amazonaws.com/query \
   -H "Content-Type: application/json" \
-  -d '{"demoMode": "demo_procurement", "sessionId": "test-001"}'
+  -d '{"query": "Bangalore se Delhi logistics chahiye", "language": "hi-IN", "sessionId": "test-001"}'
 
-# Credit demo
+# Credit query
 curl -X POST https://ei1hvlz5vg.execute-api.ap-south-1.amazonaws.com/query \
-  -d '{"demoMode": "demo_credit", "sessionId": "test-001"}'
-
-# Labour rights demo
-curl -X POST https://ei1hvlz5vg.execute-api.ap-south-1.amazonaws.com/query \
-  -d '{"demoMode": "demo_safety", "sessionId": "test-001"}'
-```
-
-### Stub Mode (pipeline testing without ASR/TTS)
-
-```bash
-aws lambda update-function-configuration \
-  --function-name shramsetu-voice-transcribe \
-  --environment 'Variables={USE_VOICE_STUB=true}'
+  -d '{"query": "Mujhe 5000 rupaye ka loan chahiye", "language": "hi-IN", "sessionId": "test-002"}'
 ```
 
 ---
 
-## 🔐 IAM Permissions
+## API Reference
 
-**voice-transcribe Lambda requires:**
+### POST `/query`
+
+**Request:**
 ```json
 {
-  "Actions": [
-    "s3:PutObject", "s3:GetObject", "s3:DeleteObject",
-    "transcribe:StartTranscriptionJob", "transcribe:GetTranscriptionJob"
-  ]
+  "query": "Bangalore se Delhi logistics chahiye",
+  "language": "hi-IN",
+  "sessionId": "session-1234567890",
+  "asrLatencyMs": 200
 }
 ```
 
-**voice-synthesize Lambda requires:**
+**Response:**
 ```json
 {
-  "Actions": ["polly:SynthesizeSpeech", "s3:PutObject", "s3:GetObject"]
+  "intent": "procurement",
+  "rankedOptions": [
+    {
+      "name": "XpressBees",
+      "topsisScore": 0.609,
+      "price": 520,
+      "deliveryDays": 1,
+      "rating": 4.6,
+      "creditAvailable": true,
+      "ondcVerified": true
+    }
+  ],
+  "hindiExplanation": "मेरे दोस्त, XpressBees आपके लिए सबसे अच्छा विकल्प है...",
+  "safetyScore": 0.97,
+  "ttsResult": {
+    "audioUrl": "https://...",
+    "t_tts": 580
+  }
 }
 ```
 
-**Critical — S3 bucket policy for Transcribe service access:**
-```json
-{
-  "Principal": { "Service": "transcribe.amazonaws.com" },
-  "Action": ["s3:GetObject", "s3:PutObject"],
-  "Resource": "arn:aws:s3:::shramsetu-saathi-assets-ap-south-1/*"
-}
-```
-Without this, Transcribe silently fails to read uploaded audio.
+---
+
+## TOPSIS Ranking
+
+Every ranking is deterministic and explainable — no black box.
+
+**Procurement weights:**
+
+| Criterion | Weight | Direction |
+|-----------|--------|-----------|
+| Price | 25% | Minimize |
+| Delivery speed | 35% | Minimize |
+| Rating | 25% | Maximize |
+| Credit available | 15% | Maximize |
+
+**Sample result — "Bangalore se Delhi logistics chahiye":**
+
+| Rank | Provider | Score | Why |
+|------|----------|-------|-----|
+| 1 | XpressBees | 0.609 | Fastest + highest rating + credit |
+| 2 | Delhivery | 0.609 | Good balance of speed + credit |
+| 3 | Namma Cargo | 0.598 | Cheapest with credit |
+| 7 | ShipRocket | 0.318 | Slow + no credit — penalised correctly |
+
+XpressBees wins despite being the most expensive. Speed and credit availability outweigh price in the weighted criteria. The worker always knows *why*.
+
+**Credit weights — "Mujhe 5000 rupaye ka loan chahiye":**
+
+| Rank | Lender | Score | Why |
+|------|--------|-------|-----|
+| 1 | NanoFin | 0.856 | Zero prepayment penalty + highest flexibility |
+| 2 | ONDC Co-op | 0.809 | Low penalty + good flexibility |
+| 4 | Jan Dhan | 0.254 | Lowest rate (10%) but worst flexibility — ranks last |
 
 ---
 
-## 🔒 Privacy & Data Handling
+## Performance
 
-All user audio is ephemeral by design. S3 lifecycle policies enforce deletion:
+| Pipeline Stage | Latency | Target |
+|----------------|---------|--------|
+| Voice ASR (Sarvam) | ~200ms | < 500ms |
+| Intent Classification (Llama 3) | ~450ms | < 1,000ms |
+| ONDC / OCEN Agent lookup | ~1ms | < 500ms |
+| TOPSIS Ranking | ~1ms | < 100ms |
+| Safety Validation (CeRAI) | ~0ms | < 100ms |
+| Explanation (Llama 3) | ~800ms | < 1,500ms |
+| TTS (Sarvam AI) | ~600ms | < 2,000ms |
+| **Total E2E** | **~2.1s** | **< 5s** |
 
-| Bucket Prefix | Retention |
-|---|---|
-| `audio-input/` | 1 day |
-| `tts-audio/` | 1 day |
-| `transcribe-output/` | 1 day |
-
-Raw audio is deleted immediately after transcription. AWS ap-south-1 ensures Indian data residency and sovereignty compliance.
-
----
-
-## 🌐 Language Support
-
-| Language | Script | Transcribe | Polly Neural |
-|---|---|---|---|
-| Hindi | Devanagari | ✅ `hi-IN` | ✅ Kajal |
-| Tamil | Tamil | ✅ `ta-IN` | ✅ Supported |
-| Bengali | Bengali | ✅ `bn-IN` | ⚠️ Standard only |
-| Kannada | Kannada | ❌ | ❌ |
-
-Kannada and Bengali neural will be addressed via Bhashini integration (registration pending). Switching requires one environment variable change — zero code modifications.
+| Accuracy Metric | Score | Test Size |
+|-----------------|-------|-----------|
+| Intent — Hindi | 95% | 20 queries |
+| Intent — Kannada | 85% | 10 queries |
+| TOPSIS consistency | 100% | Deterministic |
+| Safety catch rate | 100% | 5 predatory cases |
+| Language detection | 100% | 11 scripts |
 
 ---
 
-## 💰 Cost Analysis
+## Cost
 
-| Service | Per Query | 500 Queries |
-|---|---|---|
-| Amazon Transcribe | $0.006 | $3.00 |
-| Amazon Polly Neural | $0.0024 | $1.20 |
-| Claude Haiku (Bedrock) | ~$0.0003 | $0.15 |
-| Claude Sonnet (Bedrock) | ~$0.003 | $1.50 |
-| S3 storage + requests | <$0.0001 | ~$0.05 |
-| Step Functions | ~$0.0001 | ~$0.05 |
-| **Total** | **~₹0.67 ($0.008)** | **~$4.95** |
+| Environment | Monthly Cost | Notes |
+|-------------|-------------|-------|
+| Prototype | **< $8** | 3 of 7 services on AWS Free Tier |
+| Production (10K daily users) | **~$305** | ~₹2.5 / user / month |
 
-**At scale:** 1% adoption = 4.9M daily interactions = ~$39,200/day — justifiable against ₹20,000 average monthly transaction value per worker.
+Viable for government deployment under **Digital India / MeitY**.
 
 ---
 
-## 📱 Reach Strategy
+## Roadmap
 
-```
-200M workers    Android smartphones → PWA (this app)
-290M workers    Feature phones      → IVR via Exotel/Twilio (same Lambda backend)
-```
+### Phase 2 — 3 Months
+- [ ] Live ONDC integration via real Beckn Protocol providers
+- [ ] OCEN live lenders — real micro-loan disbursement
+- [ ] Aadhaar eKYC for credit identity verification
+- [ ] WhatsApp integration — 600M+ users, no new app needed
+- [ ] Call-in / IVR via PSTN — any feature phone can access
+- [ ] RAG-based safety — grounded on 400+ labour law documents
 
-The AI layer is voice-modality agnostic. The interface is a swap, not a rebuild.
+### Phase 3 — 6 Months
+- [ ] ABDM Health Records — voice access to medical history
+- [ ] AgriStack — crop data, weather alerts, MSP for farmers
+- [ ] BharatGen sovereign LLM — replace Llama 3 with India-built model
+- [ ] Offline mode (ONNX) — works without internet in rural areas
+- [ ] Federated learning — model improves without sharing personal data
+- [ ] All 22 official Indian languages
 
----
-
-## 🏆 Key Technical Differentiators
-
-1. **TOPSIS ranking** — deterministic math, not LLM guessing. Auditable, explainable, reproducible.
-2. **Multi-agent Step Functions pipeline** — not a monolithic chatbot. Each step is independently observable and replaceable.
-3. **DPI-native** — ONDC + OCEN 4.0 + Bhashini. No proprietary APIs, no screen-scraping.
-4. **Flow-based credit scoring** — 6 months of ONDC history replaces CIBIL. Inclusive by design.
-5. **CeRAI safety layer** — legal compliance validation before any advice is delivered.
-6. **Indian data residency** — AWS ap-south-1. No user data leaves India.
-
----
-
-## 📚 Documents
-
-| Document | Purpose |
-|---|---|
-| `ShramSetu_Bhashini_UseCase.docx` | Bhashini registration supporting document (10 sections) |
-| `ShramSetu_Transcribe_Polly_Guide.docx` | Complete ASR/TTS implementation guide with IAM, S3 architecture, testing sequence |
+### Vision
+Government platform under MeitY / Digital India — 1M+ workers, pan-India.
 
 ---
 
-## 🤝 Contributing
+## The Persona
 
-Built for the **AI for Bharat Hackathon**. Contributions welcome.
+> **Ravi Kumar** — Street vendor, HSR Layout, Bengaluru.  
+> Sells vegetables. Speaks Hindi. Owns a feature phone.  
+> Needs logistics to send goods to Delhi. Needs a ₹5,000 microloan to restock.  
+> Has never used a bank app. Has never filled a government form online.
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit your changes: `git commit -m 'Add feature'`
-4. Push and open a Pull Request
-
----
-
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE) for details.
+ShramSetu Saathi is built for Ravi.
 
 ---
 
-<div align="center">
+## License
 
-**ShramSetu Saathi** — *हर कदम पर साथ* (With you at every step)
+MIT — see [LICENSE](LICENSE) for details.
 
-Built with ❤️ for India's informal workforce
+---
 
-[🇮🇳AI for Bharat Hackathon 2026](https://example.com) · [AWS ap-south-1](https://aws.amazon.com/about-aws/global-infrastructure/regions_az/) · [ONDC](https://ondc.org/) · [OCEN 4.0](https://ocen.dev/) · [Bhashini](https://bhashini.gov.in/)
-
-</div>
+*"Every feature phone can be a gateway to government services — no smartphone, no app, no literacy required."*
